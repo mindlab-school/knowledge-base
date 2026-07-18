@@ -1,0 +1,13 @@
+{
+  "name": "knowledge-base",
+  "owner": {
+    "name": "mindlab-school"
+  },
+  "plugins": [
+    {
+      "name": "kb-agent",
+      "source": "./plugin",
+      "description": "Доступ к корпоративной базе знаний из Claude Code (поиск, факты, сущности, загрузка)."
+    }
+  ]
+}

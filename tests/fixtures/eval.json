@@ -1,0 +1,34 @@
+{
+  "documents": {
+    "reglament_otpuskov": {"doc_type": "regulation", "required": ["owner", "review_by", "status"]},
+    "reglament_komandirovok": {"doc_type": "regulation", "required": ["owner", "review_by", "status"]},
+    "reglament_skidok": {"doc_type": "regulation", "required": ["owner", "review_by", "status"]},
+    "instrukciya_vpn": {"doc_type": "instruction", "required": ["topic", "audience", "systems"]},
+    "instrukciya_onbording": {"doc_type": "instruction", "required": ["topic", "audience", "systems"]},
+    "instrukciya_1c": {"doc_type": "instruction", "required": ["topic", "audience", "systems"]},
+    "faq_hr": {"doc_type": "faq", "required": ["topic"]},
+    "faq_it": {"doc_type": "faq", "required": ["topic"]},
+    "faq_bukhgalteriya": {"doc_type": "faq", "required": ["topic"]},
+    "protokol_proekt_x_may": {"doc_type": "meeting_notes", "required": ["meeting_date", "participants", "decisions"]},
+    "protokol_proekt_x_iyun": {"doc_type": "meeting_notes", "required": ["meeting_date", "participants", "decisions"]},
+    "protokol_it_infra": {"doc_type": "meeting_notes", "required": ["meeting_date", "participants", "decisions"]}
+  },
+  "questions": [
+    {"q": "как оформить отпуск?", "expect_docs": ["reglament_otpuskov"], "in_corpus": true},
+    {"q": "какие суточные положены в командировке по России?", "expect_docs": ["reglament_komandirovok"], "in_corpus": true},
+    {"q": "какую скидку может согласовать менеджер по продажам?", "expect_docs": ["reglament_skidok"], "in_corpus": true},
+    {"q": "как подключиться к корпоративному vpn?", "expect_docs": ["instrukciya_vpn"], "in_corpus": true},
+    {"q": "как проходит онбординг нового сотрудника?", "expect_docs": ["instrukciya_onbording"], "in_corpus": true},
+    {"q": "как ввести первичный документ в 1с бухгалтерии?", "expect_docs": ["instrukciya_1c"], "in_corpus": true},
+    {"q": "как получить справку 2-ндфл?", "expect_docs": ["faq_hr"], "in_corpus": true},
+    {"q": "как сбросить пароль от учётной записи?", "expect_docs": ["faq_it"], "in_corpus": true},
+    {"q": "когда выплачивается заработная плата?", "expect_docs": ["faq_bukhgalteriya"], "in_corpus": true},
+    {"q": "какие решения приняли по проекту x в мае?", "expect_docs": ["protokol_proekt_x_may"], "in_corpus": true},
+    {"q": "какие поручения дали по проекту x в июне?", "expect_docs": ["protokol_proekt_x_iyun"], "in_corpus": true},
+    {"q": "что решили по модернизации ит-инфраструктуры?", "expect_docs": ["protokol_it_infra"], "in_corpus": true},
+    {"q": "какая погода в Париже сегодня?", "in_corpus": false},
+    {"q": "кто выиграл чемпионат мира по футболу в 2022 году?", "in_corpus": false},
+    {"q": "какая столица Австралии?", "in_corpus": false},
+    {"q": "как приготовить классический борщ?", "in_corpus": false}
+  ]
+}

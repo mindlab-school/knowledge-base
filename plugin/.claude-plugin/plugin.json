@@ -1,0 +1,8 @@
+{
+  "name": "kb-agent",
+  "version": "0.1.0",
+  "description": "Доступ к корпоративной базе знаний из Claude Code: поиск, факты, сущности, загрузка документов.",
+  "author": {
+    "name": "mindlab-school"
+  }
+}

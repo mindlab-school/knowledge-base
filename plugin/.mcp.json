@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kb-agent": {
+      "command": "python",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.py"],
+      "env": {
+        "KB_BACKEND_URL": "${KB_BACKEND_URL}",
+        "KB_USER_ID": "${KB_USER_ID}"
+      }
+    }
+  }
+}
