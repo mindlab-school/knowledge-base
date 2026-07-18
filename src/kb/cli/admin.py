@@ -295,9 +295,10 @@ async def _eval_type_accuracy(
 ) -> float | None:
     total = 0
     correct = 0
-    for source_path, label in labels.items():
+    for title, label in labels.items():
         row = await conn.fetchrow(
-            "SELECT doc_type FROM documents WHERE source_path = $1", source_path
+            "SELECT doc_type FROM documents WHERE lower(title) = lower($1) ORDER BY id LIMIT 1",
+            title,
         )
         if row is None:
             continue
@@ -312,12 +313,13 @@ async def _eval_attr_completeness(
 ) -> float | None:
     required_total = 0
     present = 0
-    for source_path, label in labels.items():
+    for title, label in labels.items():
         required = label.get("required", [])
         if not required:
             continue
         row = await conn.fetchrow(
-            "SELECT attributes FROM documents WHERE source_path = $1", source_path
+            "SELECT attributes FROM documents WHERE lower(title) = lower($1) ORDER BY id LIMIT 1",
+            title,
         )
         if row is None:
             continue
