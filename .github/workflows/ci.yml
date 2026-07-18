@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+
+jobs:
+  lint-type-unit:
+    name: lint + mypy + unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: mypy (strict)
+        run: uv run mypy
+      - name: Unit tests
+        run: uv run pytest -m "not integration"
+
+  integration:
+    name: integration (postgres + pgvector)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg18
+        env:
+          POSTGRES_USER: kb
+          POSTGRES_PASSWORD: kb
+          POSTGRES_DB: kb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kb -d kb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      KB_TEST_DSN: postgresql://kb:kb@localhost:5432/kb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync
+      - name: Integration tests
+        run: uv run pytest -m integration

@@ -1,0 +1,46 @@
+# KB Agent — one image, entrypoint selects the process. Profiles: api, bot.
+services:
+  db:
+    image: pgvector/pgvector:0.8.2-pg18
+    environment:
+      POSTGRES_USER: kb
+      POSTGRES_PASSWORD: kb
+      POSTGRES_DB: kb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: "256mb"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kb -d kb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    profiles: ["api"]
+    env_file: [.env]
+    environment:
+      KB_PROCESS: api
+      DATABASE_URL: postgresql://kb:kb@db:5432/kb
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  bot:
+    build: .
+    profiles: ["bot"]
+    env_file: [.env]
+    environment:
+      KB_PROCESS: bot
+      DATABASE_URL: postgresql://kb:kb@db:5432/kb
+      BACKEND_URL: http://api:8000
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
