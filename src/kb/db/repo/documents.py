@@ -256,3 +256,35 @@ async def clear_outgoing_links(conn: asyncpg.Connection, document_id: int) -> No
     """
     await conn.execute("DELETE FROM document_links WHERE source_id = $1", document_id)
     await conn.execute("DELETE FROM pending_document_links WHERE source_id = $1", document_id)
+
+
+async def list_ids_for_reextract(
+    conn: asyncpg.Connection,
+    *,
+    status: str | None = None,
+    doc_type: str | None = None,
+    not_model: str | None = None,
+) -> list[int]:
+    """Select document ids matching reextract filters (all if no filters given)."""
+    conditions: list[str] = []
+    params: list[Any] = []
+    if status is not None:
+        params.append(status)
+        conditions.append(f"extraction_status = ${len(params)}")
+    if doc_type is not None:
+        params.append(doc_type)
+        conditions.append(f"doc_type = ${len(params)}")
+    if not_model is not None:
+        params.append(not_model)
+        conditions.append(f"extraction_model IS DISTINCT FROM ${len(params)}")
+    where = " AND ".join(conditions) if conditions else "TRUE"
+    rows = await conn.fetch(f"SELECT id FROM documents WHERE {where} ORDER BY id", *params)
+    return [int(row["id"]) for row in rows]
+
+
+async def list_url_source_paths(conn: asyncpg.Connection) -> list[str]:
+    """Return the source paths (normalised URLs) of all url-sourced documents."""
+    rows = await conn.fetch(
+        "SELECT source_path FROM documents WHERE source_kind = 'url' ORDER BY id"
+    )
+    return [row["source_path"] for row in rows]

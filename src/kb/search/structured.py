@@ -130,3 +130,29 @@ async def get_document(
     pool = pool or await get_pool()
     async with pool.acquire() as conn:
         return await documents_repo.get(conn, document_id)
+
+
+_MENTIONS_SQL = """
+SELECT e.entity_type, e.name, em.role
+FROM entity_mentions em
+JOIN entities e ON e.id = em.entity_id
+WHERE em.document_id = $1
+ORDER BY e.id
+"""
+
+
+async def get_document_card(
+    document_id: int, *, pool: asyncpg.Pool | None = None
+) -> dict[str, Any] | None:
+    """Return a document with its chunk count and entity mentions (with roles)."""
+    pool = pool or await get_pool()
+    async with pool.acquire() as conn:
+        document = await documents_repo.get(conn, document_id)
+        if document is None:
+            return None
+        chunks = await documents_repo.chunk_count(conn, document_id)
+        mentions = await conn.fetch(_MENTIONS_SQL, document_id)
+    card = dict(document)
+    card["chunks"] = chunks
+    card["entities"] = [dict(row) for row in mentions]
+    return card

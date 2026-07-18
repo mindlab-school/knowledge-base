@@ -213,4 +213,5 @@ async def answer(
 
     if not final_answer.strip():
         final_answer = NO_ANSWER
+    total_usage["model"] = model_used
     return AnswerResult(answer=final_answer, model=model_used, usage=total_usage, rounds=rounds)
