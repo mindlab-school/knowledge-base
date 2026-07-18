@@ -55,3 +55,10 @@ def test_entity_with_role() -> None:
 def test_unknown_key_ignored() -> None:
     _sql, params = build_document_where({"whatever": "x", "doc_type": "faq"})
     assert params == ["faq"]
+
+
+def test_non_dict_filters_yields_true() -> None:
+    # A malformed tool call may pass a string instead of an object; degrade gracefully.
+    sql, params = build_document_where("regulation")  # type: ignore[arg-type]
+    assert sql == "TRUE"
+    assert params == []
