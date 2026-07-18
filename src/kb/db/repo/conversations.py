@@ -75,3 +75,16 @@ async def last_messages(
         limit,
     )
     return [dict(r) for r in records]
+
+
+async def month_to_date_cost(conn: asyncpg.Connection) -> float:
+    """Sum the OpenRouter ``cost`` field over this calendar month's messages (USD)."""
+    value = await conn.fetchval(
+        """
+        SELECT COALESCE(SUM((usage->>'cost')::float), 0)
+        FROM messages
+        WHERE usage ? 'cost'
+          AND created_at >= date_trunc('month', now())
+        """
+    )
+    return float(value)
