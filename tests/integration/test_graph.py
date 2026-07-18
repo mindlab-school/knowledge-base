@@ -119,3 +119,23 @@ async def test_pending_link_resolves_on_target_ingest(pool: Any, fake_embedder: 
     assert link["source_id"] == beta.document_id
     assert link["target_id"] == alpha.document_id
     assert pending == 0
+
+
+async def test_related_documents_marks_superseded_version(pool: Any, fake_embedder: Any) -> None:
+    payload = extraction_payload("generic", attributes={"summary": "s", "language": "ru"})
+    new = await _ingest(pool, fake_embedder, title="Новая", source_path="new.md", payload=payload)
+    old = await _ingest(pool, fake_embedder, title="Старая", source_path="old.md", payload=payload)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO document_links (source_id, target_id, kind) VALUES ($1, $2, 'supersedes')",
+            new.document_id,
+            old.document_id,
+        )
+
+    related_to_new = await graph.related_documents(new.document_id, pool=pool)
+    assert [row["id"] for row in related_to_new] == [old.document_id]
+    assert related_to_new[0]["current"] is False  # old is superseded
+
+    related_to_old = await graph.related_documents(old.document_id, pool=pool)
+    assert related_to_old[0]["id"] == new.document_id
+    assert related_to_old[0]["current"] is True

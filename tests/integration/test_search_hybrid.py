@@ -68,3 +68,34 @@ async def test_semantic_query_returns_relevant_document(pool: Any, fake_embedder
     assert results
     assert vacations.document_id in {item["document_id"] for item in results}
     assert all("score" in item and "fragment" in item for item in results)
+
+
+async def test_filtered_search_uses_iterative_scan(pool: Any, fake_embedder: Any) -> None:
+    loaded = LoadedDoc(
+        source_path="reg.md",
+        title="Регламент",
+        text="# Регламент\nПорядок оформления отпуска сотрудника компании.",
+    )
+    regulation = await ingest_loaded(
+        loaded,
+        pool=pool,
+        embedder=fake_embedder,
+        llm=extraction_llm(
+            extraction_payload("regulation", attributes={"owner": "X", "status": "active"})
+        ),
+        settings=_SETTINGS,
+    )
+    await _ingest(
+        pool,
+        fake_embedder,
+        title="Заметка",
+        source_path="note.md",
+        text="Порядок оформления отпуска сотрудника в свободной форме.",
+    )
+
+    results = await semantic.search_chunks(
+        "оформление отпуска", filters={"doc_type": "regulation"}, pool=pool, embedder=fake_embedder
+    )
+    found = {item["document_id"] for item in results}
+    assert regulation.document_id in found
+    assert found == {regulation.document_id}
