@@ -27,3 +27,7 @@ models/
 
 # OS
 .DS_Store
+
+# Done-loop attestation (local only)
+.claude/.done
+.claude/.blocked
