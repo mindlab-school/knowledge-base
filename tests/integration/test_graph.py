@@ -139,3 +139,20 @@ async def test_related_documents_marks_superseded_version(pool: Any, fake_embedd
     related_to_old = await graph.related_documents(old.document_id, pool=pool)
     assert related_to_old[0]["id"] == new.document_id
     assert related_to_old[0]["current"] is True
+
+
+async def test_duplicate_null_role_mention_deduped(pool: Any, fake_embedder: Any) -> None:
+    payload = extraction_payload(
+        "generic",
+        attributes={"summary": "s", "language": "ru"},
+        entities=[
+            {"entity_type": "person", "name": "Дубль"},
+            {"entity_type": "person", "name": "Дубль"},
+        ],
+    )
+    await _ingest(pool, fake_embedder, title="Док", source_path="dup.md", payload=payload)
+    async with pool.acquire() as conn:
+        mentions = await conn.fetchval("SELECT count(*) FROM entity_mentions")
+        entities = await conn.fetchval("SELECT count(*) FROM entities")
+    assert entities == 1
+    assert mentions == 1

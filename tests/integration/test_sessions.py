@@ -72,3 +72,28 @@ async def test_second_ingest_closes_not_opens(
     second = await session_service.toggle_session(user_id, pool=pool, embedder=fake_embedder)
     assert first.state == "opened"
     assert second.state == "closed"
+
+
+async def test_idle_session_autocloses(
+    pool: Any, fake_embedder: Any, whitelisted_user: dict[str, Any]
+) -> None:
+    user_id = whitelisted_user["id"]
+    opened = await session_service.toggle_session(user_id, pool=pool, embedder=fake_embedder)
+    await session_service.append_text(opened.session_id, "черновик заметки", pool=pool)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE ingest_sessions SET last_active_at = now() - interval '61 minutes' WHERE id = $1",
+            opened.session_id,
+        )
+
+    result = await session_service.maybe_autoclose(user_id, pool=pool, embedder=fake_embedder)
+    assert result is not None
+    assert result.action == "saved"
+    assert await session_service.get_active_session(user_id, pool=pool) is None
+    async with pool.acquire() as conn:
+        assert await conn.fetchval("SELECT count(*) FROM facts WHERE invalid_at IS NULL") == 1
+
+    # A fresh session is not stale, so autoclose is a no-op.
+    await session_service.toggle_session(user_id, pool=pool, embedder=fake_embedder)
+    assert await session_service.maybe_autoclose(user_id, pool=pool, embedder=fake_embedder) is None

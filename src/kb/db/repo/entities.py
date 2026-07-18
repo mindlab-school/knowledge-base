@@ -47,7 +47,26 @@ async def upsert_entity(
 async def add_mention(
     conn: asyncpg.Connection, entity_id: int, document_id: int, role: str | None
 ) -> None:
-    """Link an entity to a document with a role (idempotent)."""
+    """Link an entity to a document with a role (idempotent).
+
+    A ``NULL`` role needs an explicit existence check: Postgres treats NULLs as
+    distinct in the unique constraint, so ``ON CONFLICT DO NOTHING`` would not
+    dedupe two role-less mentions of the same entity in one document.
+    """
+    if role is None:
+        await conn.execute(
+            """
+            INSERT INTO entity_mentions (entity_id, document_id, role)
+            SELECT $1, $2, NULL
+            WHERE NOT EXISTS (
+                SELECT 1 FROM entity_mentions
+                WHERE entity_id = $1 AND document_id = $2 AND role IS NULL
+            )
+            """,
+            entity_id,
+            document_id,
+        )
+        return
     await conn.execute(
         """
         INSERT INTO entity_mentions (entity_id, document_id, role)

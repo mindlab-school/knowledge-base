@@ -174,6 +174,7 @@ async def ingest_file(
         raise HTTPException(status_code=413, detail="файл превышает 20 MB")
 
     pool = await get_pool()
+    await maybe_autoclose(int(user["id"]), pool=pool)
     active = await get_active_session(int(user["id"]), pool=pool)
     session_id = int(active["id"]) if active else None
 
@@ -199,6 +200,7 @@ async def ingest_file(
 async def ingest_url(request: UrlRequest) -> dict[str, Any]:
     user = await _require_user(request.telegram_id)
     pool = await get_pool()
+    await maybe_autoclose(int(user["id"]), pool=pool)
     active = await get_active_session(int(user["id"]), pool=pool)
     session_id = int(active["id"]) if active else None
     result = await ingest_source(UrlSource(request.url), session_id=session_id, pool=pool)
@@ -228,6 +230,7 @@ async def ingest_session(request: SessionRequest) -> dict[str, Any]:
 async def ingest_message(request: MessageRequest) -> dict[str, int]:
     user = await _require_user(request.telegram_id)
     pool = await get_pool()
+    await maybe_autoclose(int(user["id"]), pool=pool)
     active = await get_active_session(int(user["id"]), pool=pool)
     if active is None:
         raise HTTPException(status_code=409, detail="нет активной сессии набора")
