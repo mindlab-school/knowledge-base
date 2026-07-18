@@ -1,0 +1,80 @@
+[
+  {
+    "file": "01-hwschool-online.md",
+    "title": "Детская онлайн-школа Hello World | Курсы для детей от 6 до 17 лет",
+    "source_path": "https://hwschool.online/",
+    "source_kind": "url"
+  },
+  {
+    "file": "02-o-shkole.md",
+    "title": "Об IT-школе для детей Hello world | hwschool.online",
+    "source_path": "https://hwschool.online/o-shkole",
+    "source_kind": "url"
+  },
+  {
+    "file": "03-contacts.md",
+    "title": "Контакты | Онлайн-школа Hello World",
+    "source_path": "https://hwschool.online/contacts",
+    "source_kind": "url"
+  },
+  {
+    "file": "04-map.md",
+    "title": "Карта сайта - детская школа программирования Hello World | hwschool.online",
+    "source_path": "https://hwschool.online/map",
+    "source_kind": "url"
+  },
+  {
+    "file": "05-courses.md",
+    "title": "Курсы для детей от 6 до 17 лет | Hello World",
+    "source_path": "https://hwschool.online/catalog/courses",
+    "source_kind": "url"
+  },
+  {
+    "file": "06-python.md",
+    "title": "Курс Python для детей онлайн - Научим вашего ребенка программировать. | hwschool.online",
+    "source_path": "https://hwschool.online/python",
+    "source_kind": "url"
+  },
+  {
+    "file": "07-scratch-programmirovanie-dlya-detej.md",
+    "title": "Курс Scratch для детей - Уроки программирования для начинающих | hwschool.online",
+    "source_path": "https://hwschool.online/scratch-programmirovanie-dlya-detej",
+    "source_kind": "url"
+  },
+  {
+    "file": "08-roblox.md",
+    "title": "Курс по программированию Roblox для детей онлайн | hwschool.online",
+    "source_path": "https://hwschool.online/roblox",
+    "source_kind": "url"
+  },
+  {
+    "file": "09-frontend.md",
+    "title": "Курсы по созданию сайтов для детей онлайн | hwschool.online",
+    "source_path": "https://hwschool.online/frontend",
+    "source_kind": "url"
+  },
+  {
+    "file": "10-unity.md",
+    "title": "Курсы Unity для детей - Программирование на C# | hwschool.online",
+    "source_path": "https://hwschool.online/unity",
+    "source_kind": "url"
+  },
+  {
+    "file": "11-mentalnaya-arifmetika-dlya-detey.md",
+    "title": "Курс ментальная арифметика для детей онлайн | hwschool.online",
+    "source_path": "https://hwschool.online/mentalnaya-arifmetika-dlya-detey",
+    "source_kind": "url"
+  },
+  {
+    "file": "12-online-repetitory-dlya-detey.md",
+    "title": "Онлайн репетиторы для детей от 7 лет | hwschool.online",
+    "source_path": "https://hwschool.online/online-repetitory-dlya-detey",
+    "source_kind": "url"
+  },
+  {
+    "file": "13-official-info.md",
+    "title": "Сведения об образовательной организации | hwschool.online",
+    "source_path": "https://hwschool.online/official_info",
+    "source_kind": "url"
+  }
+]
