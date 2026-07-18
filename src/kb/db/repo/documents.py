@@ -246,3 +246,13 @@ async def resolve_pending_links_for(
             created += 1
         await conn.execute("DELETE FROM pending_document_links WHERE id = $1", int(row["id"]))
     return created
+
+
+async def clear_outgoing_links(conn: asyncpg.Connection, document_id: int) -> None:
+    """Remove this document's outgoing links (materialised and pending).
+
+    Called before re-writing links on re-ingestion so stale references do not
+    accumulate across versions.
+    """
+    await conn.execute("DELETE FROM document_links WHERE source_id = $1", document_id)
+    await conn.execute("DELETE FROM pending_document_links WHERE source_id = $1", document_id)

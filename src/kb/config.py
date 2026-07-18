@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     embed_model: str = "voyage-4-nano"
     # Must match ``halfvec(N)`` in the schema. Changing it requires a reindex.
     embed_dim: int = 1024
+    # Local ONNX backend only: directory holding model.onnx + tokenizer.json.
+    embed_model_path: str = "models/voyage-4-nano"
 
     # --- Prompt cache ---------------------------------------------------
     prompt_cache: PromptCacheMode = "auto"

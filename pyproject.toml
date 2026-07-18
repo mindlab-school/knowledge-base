@@ -74,8 +74,11 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
-    "E501",  # line length handled by formatter
-    "B008",  # FastAPI Depends() in defaults is idiomatic
+    "E501",   # line length handled by formatter
+    "B008",   # FastAPI Depends() in defaults is idiomatic
+    "RUF001", # ambiguous unicode in strings — expected (Russian/Cyrillic content)
+    "RUF002", # ambiguous unicode in docstrings — expected (Russian/Cyrillic content)
+    "RUF003", # ambiguous unicode in comments — expected (Russian/Cyrillic content)
 ]
 
 [tool.ruff.lint.per-file-ignores]
