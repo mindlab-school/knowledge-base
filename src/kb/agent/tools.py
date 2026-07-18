@@ -124,6 +124,25 @@ def _json(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+def _coerce_filters(value: Any) -> dict[str, Any] | None:
+    """Normalise a ``filters`` tool argument to a dict.
+
+    The model occasionally sends ``filters`` as a JSON-encoded string instead of an
+    object; parse it when possible, and drop anything that is not a dict so the
+    search layer never receives a malformed value.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
 async def _search_knowledge_base(
     args: dict[str, Any], *, pool: asyncpg.Pool, embedder: Embedder, settings: Settings
 ) -> str:
@@ -131,13 +150,13 @@ async def _search_knowledge_base(
     if not query:
         return _json({"error": "пустой запрос"})
     results = await semantic.search_chunks(
-        query, args.get("filters"), pool=pool, embedder=embedder, settings=settings
+        query, _coerce_filters(args.get("filters")), pool=pool, embedder=embedder, settings=settings
     )
     return _json(results)
 
 
 async def _query_documents(args: dict[str, Any], *, pool: asyncpg.Pool) -> str:
-    filters = args.get("filters") or {}
+    filters = _coerce_filters(args.get("filters")) or {}
     documents = await structured.query_documents(filters, limit=_DOCUMENT_CAP, pool=pool)
     total = await structured.count_documents(filters, pool=pool)
     payload: dict[str, Any] = {"documents": documents, "applied_filters": filters}

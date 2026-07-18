@@ -74,9 +74,12 @@ def build_document_where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
       (e.g. ``review_by_before``);
     * ``entity`` — ``{"name": ..., "role"?: ...}`` mention existence.
 
-    Unknown keys are ignored.
+    Unknown keys are ignored. A non-dict ``filters`` (e.g. a stray string from a
+    malformed tool call) yields an empty ``WHERE`` instead of raising.
     """
     where = _Where()
+    if not isinstance(filters, dict):
+        return where.sql, where.params
     for key, value in filters.items():
         if value is None:
             continue
