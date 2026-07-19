@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from kb.search.structured import build_document_where
 
 
@@ -26,14 +28,20 @@ def test_attributes_containment() -> None:
 
 def test_attribute_date_filter() -> None:
     sql, params = build_document_where({"review_by_before": "2026-07-18"})
-    assert "(d.attributes ->> $1)::date < $2::date" in sql
-    assert params == ["review_by", "2026-07-18"]
+    assert "(d.attributes ->> $1)::date < $2" in sql
+    assert params == ["review_by", date(2026, 7, 18)]
 
 
 def test_created_range() -> None:
     sql, params = build_document_where({"created_after": "2026-01-01"})
-    assert "d.created_at > $1" in sql
-    assert params == ["2026-01-01"]
+    assert "d.created_at::date > $1" in sql
+    assert params == [date(2026, 1, 1)]
+
+
+def test_unparseable_date_predicate_skipped() -> None:
+    sql, params = build_document_where({"created_before": "not-a-date"})
+    assert sql == "TRUE"
+    assert params == []
 
 
 def test_entity_with_role() -> None:
@@ -47,3 +55,10 @@ def test_entity_with_role() -> None:
 def test_unknown_key_ignored() -> None:
     _sql, params = build_document_where({"whatever": "x", "doc_type": "faq"})
     assert params == ["faq"]
+
+
+def test_non_dict_filters_yields_true() -> None:
+    # A malformed tool call may pass a string instead of an object; degrade gracefully.
+    sql, params = build_document_where("regulation")  # type: ignore[arg-type]
+    assert sql == "TRUE"
+    assert params == []

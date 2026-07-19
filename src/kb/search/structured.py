@@ -8,6 +8,7 @@ unit-test in isolation.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 import asyncpg
@@ -16,6 +17,29 @@ from kb.db.pool import get_pool
 from kb.db.repo import documents as documents_repo
 
 DEFAULT_DOCUMENT_LIMIT = 15
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    """Parse an ISO date/datetime string into a ``date``.
+
+    ``asyncpg`` binds a date/timestamp parameter from a Python ``date``/``datetime``
+    object, not from a string — a bare ISO string raises ``DataError`` even with a
+    ``::date`` SQL cast. Returns ``None`` for unparseable input so the caller can
+    skip the predicate instead of failing the whole query.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        try:
+            return datetime.fromisoformat(value).date()
+        except ValueError:
+            return None
 
 
 class _Where:
@@ -50,9 +74,12 @@ def build_document_where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
       (e.g. ``review_by_before``);
     * ``entity`` — ``{"name": ..., "role"?: ...}`` mention existence.
 
-    Unknown keys are ignored.
+    Unknown keys are ignored. A non-dict ``filters`` (e.g. a stray string from a
+    malformed tool call) yields an empty ``WHERE`` instead of raising.
     """
     where = _Where()
+    if not isinstance(filters, dict):
+        return where.sql, where.params
     for key, value in filters.items():
         if value is None:
             continue
@@ -63,9 +90,13 @@ def build_document_where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
         elif key == "title_contains":
             where.add(f"d.title ILIKE '%' || {where.placeholder(value)} || '%'")
         elif key == "created_before":
-            where.add(f"d.created_at < {where.placeholder(value)}")
+            parsed = _parse_iso_date(value)
+            if parsed is not None:
+                where.add(f"d.created_at::date < {where.placeholder(parsed)}")
         elif key == "created_after":
-            where.add(f"d.created_at > {where.placeholder(value)}")
+            parsed = _parse_iso_date(value)
+            if parsed is not None:
+                where.add(f"d.created_at::date > {where.placeholder(parsed)}")
         elif key == "entity" and isinstance(value, dict) and value.get("name"):
             canonical = str(value["name"]).strip().lower()
             role = value.get("role")
@@ -78,13 +109,19 @@ def build_document_where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
                 base += f" AND em.role = {where.placeholder(str(role))}"
             where.add(base + ")")
         elif key.endswith("_before"):
+            parsed = _parse_iso_date(value)
+            if parsed is None:
+                continue
             field = key[: -len("_before")]
             column = where.placeholder(field)
-            where.add(f"(d.attributes ->> {column})::date < {where.placeholder(value)}::date")
+            where.add(f"(d.attributes ->> {column})::date < {where.placeholder(parsed)}")
         elif key.endswith("_after"):
+            parsed = _parse_iso_date(value)
+            if parsed is None:
+                continue
             field = key[: -len("_after")]
             column = where.placeholder(field)
-            where.add(f"(d.attributes ->> {column})::date > {where.placeholder(value)}::date")
+            where.add(f"(d.attributes ->> {column})::date > {where.placeholder(parsed)}")
     return where.sql, where.params
 
 

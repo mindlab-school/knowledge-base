@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help install up down migrate ingest ingest-url refresh-urls run-api run-bot \
-        test test-unit test-integration lint format typecheck check
+        test test-unit test-integration lint format typecheck check \
+        eval-ingest eval-run eval
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -32,6 +33,15 @@ run-api: ## Run the FastAPI backend
 
 run-bot: ## Run the Telegram bot (long polling)
 	uv run python -m kb.channels.telegram
+
+eval-ingest: ## Reset DB + ingest the Hello World eval corpus snapshot
+	uv run python scripts/eval_hw.py ingest
+
+eval-run: ## Ask the 100 eval questions (add ARGS="--only 31,33" or "--judge")
+	uv run python scripts/eval_hw.py run $(ARGS)
+
+eval: ## Full eval: re-ingest corpus, ask all 100 questions, LLM-graded report
+	uv run python scripts/eval_hw.py all --judge
 
 test: ## Run the full test suite
 	uv run pytest
