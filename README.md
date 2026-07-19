@@ -103,9 +103,10 @@ It answers two classes of question:
 | **Tooling** | `ruff` (lint + format), `mypy --strict` |
 | **Packaging/deploy** | `uv`, Docker (single image), Docker Compose |
 
-Heavy dependencies are **optional extras**, loaded lazily and only in the ingestion
-path: `parse` (docling) and `embed-local` (onnxruntime + tokenizers). The `mcp`
-extra is only needed by the plugin server.
+Heavy dependencies are **optional extras**, loaded lazily: `parse` (docling) only in
+the ingestion path; `embed-local` (onnxruntime + tokenizers) wherever embeddings are
+computed under `EMBED_BACKEND=local` — both when ingesting documents **and** when
+embedding queries at search time. The `mcp` extra is only needed by the plugin server.
 
 ---
 
@@ -121,7 +122,8 @@ Telegram bot / MCP ──HTTP──▶ FastAPI backend ──▶ Agent loop (Cla
                                     PostgreSQL 18 + pgvector (halfvec, HNSW)
                                                       ▲
                           DATA PATH (offline)         │ one transaction
-Files / URL / text ──▶ Ingestion: parse ▶ LLM extract ▶ chunk ▶ embed ▶ write
+Files / URL ──▶ Ingestion: parse ▶ LLM extract ▶ chunk ▶ embed ▶ write
+(free text in an /ingest session becomes a fact — no chunks/embeddings)
 ```
 
 ### Query path (online)
@@ -141,8 +143,9 @@ Files / URL / text ──▶ Ingestion: parse ▶ LLM extract ▶ chunk ▶ embe
 
 ### Data path (offline)
 
-1. A **source adapter** normalises the input to plain text: `.txt`/`.md` read
-   directly, `.html`/URL via `trafilatura`, `.pdf`/`.docx`/`.pptx` via `docling`.
+1. A **source adapter** normalises the input to plain text: `.txt`/`.md`/`.markdown`
+   read directly, `.html`/`.htm`/URL via `trafilatura`, `.pdf`/`.docx`/`.pptx` via
+   `docling`.
 2. If the `content_hash` (SHA-256 of the text) already exists at that
    `source_path`, ingestion is a **no-op**. Otherwise one **LLM extraction** call
    determines the type, attributes, entities, relations and links.
@@ -264,9 +267,10 @@ supports, AND-combined:
   (`lower(trim(name))`), falling back to a fuzzy `ILIKE`, then returns the entity,
   its mentioning documents (with roles) and its graph neighbourhood.
 - **`graph.py` — traversal.** A single **recursive CTE** walks `entity_relations`
-  (undirected), capped at `MAX_DEPTH = 3` and `MAX_NODES = 40`, cycle-safe via a
-  visited-path array. `related_documents` walks `document_links` and flags versions
-  superseded by a `supersedes` link (`current = false`).
+  (undirected, following only currently-valid edges where `invalid_at IS NULL`), capped
+  at `MAX_DEPTH = 3` and `MAX_NODES = 40`, cycle-safe via a visited-path array.
+  `related_documents` walks `document_links` and flags versions superseded by a
+  `supersedes` link (`current = false`).
 - **`facts.py` — fact orchestration** (see [Facts](#facts)).
 
 ### Ingestion internals (`src/kb/ingestion/`)
@@ -296,8 +300,8 @@ supports, AND-combined:
   resolved to document ids or, if the target doesn’t exist yet, stored in
   `pending_document_links` and materialised later when the target is ingested
   (reverse-by-name resolution).
-- **Re-extraction.** `reextract_document` re-runs type/attribute/graph extraction
-  and leaves chunks and embeddings untouched.
+- **Re-extraction.** `reextract_document` re-runs type/attribute/graph extraction;
+  chunks, embeddings, and document links are left untouched.
 
 ### Facts
 
@@ -320,7 +324,7 @@ Migrations are **forward-only** numbered SQL files under `migrations/`, applied 
 
 | Migration | Adds |
 |---|---|
-| `0001_init.sql` | Core schema (all tables below) + `pgvector` extension |
+| `0001_init.sql` | Core schema — all tables below **except** `pending_document_links` (added by 0004) and `schema_migrations` (created by the migration runner) — + `pgvector` extension |
 | `0002_source_kind.sql` | `documents.source_kind` (`file` \| `url`) |
 | `0003_session_activity.sql` | `ingest_sessions.last_active_at` (idle autoclose) |
 | `0004_pending_links.sql` | `pending_document_links` (deferred link resolution) |
@@ -577,7 +581,7 @@ ordinary text goes to `/ingest/message` and falls through to `/chat` on `409`
 | `/del <topic>` | Soft-delete (invalidate) the active fact for a topic. |
 | *(any text)* | Buffered into the session if one is open, else answered by the agent. |
 | *(a URL-only message)* | Ingest the page(s) as document(s). |
-| *(a file attachment)* | Ingest the file (`.txt/.md/.pdf/.docx/.pptx/.html`). |
+| *(a file attachment)* | Ingest the file (`.txt/.md/.markdown/.pdf/.docx/.pptx/.html/.htm`). |
 
 While the agent thinks, the bot shows a “typing…” action. Long answers are split
 into ≤ 4000-character parts on paragraph boundaries.
@@ -595,7 +599,7 @@ The `/search*` endpoints exist for the MCP plugin.
 | `GET /health` | — | Liveness probe → `{"status": "ok"}`. |
 | `POST /chat` | `{telegram_id, text}` | Run the agent loop; returns `{answer}`. Autocloses idle sessions, loads history, persists messages + usage. |
 | `POST /reset` | `{telegram_id}` | Reset the caller’s active conversation. |
-| `POST /ingest/file` | multipart: `telegram_id`, `file`, `origin` (`file`/`telegram`), `filename?` | Ingest an uploaded file (**≤ 20 MB**). Returns an ingest card. |
+| `POST /ingest/file` | multipart: `telegram_id`, `file`, `origin` (`file`/`telegram`), `filename?` | Ingest an uploaded file. Returns an ingest card. Rejects unsupported types with `400` and files over **20 MB** with `413`. |
 | `POST /ingest/url` | `{telegram_id, url}` | Ingest a web page. |
 | `POST /ingest/session` | `{telegram_id}` | Toggle the capture session → `{state: opened}` or `{state: closed, topic, action, documents}`. |
 | `POST /ingest/message` | `{telegram_id, text}` | Buffer text into the active session → `{seq}`, or `409` if none is active. |
@@ -617,7 +621,7 @@ uv run python -m kb.cli.admin <command> [args]
 | Command | Description |
 |---|---|
 | `stats` | Counts by document type, extraction status, and entity type; total chunks and active facts. |
-| `stats --cost` | Month-to-date OpenRouter spend, broken down by model and by user. |
+| `stats --cost` | Headline total is month-to-date OpenRouter spend; the per-model and per-user breakdowns below it are all-time totals. |
 | `graph` | Graph size: nodes by type, active edges by relation, top-10 entities by degree, isolated-node count. |
 | `sessions` | Active ingest sessions (buffered messages, attached docs, last activity). |
 | `facts` | Fact topics with content length and update time. |
@@ -642,6 +646,7 @@ prints each metric against its threshold:
 | `attribute_completeness` | 0.80 | Required attributes present after extraction. |
 | `recall_at_4` | 0.85 | An expected document appears in the top-4 chunk search. |
 | `refusals` | 1.00 | Out-of-corpus questions are correctly refused (“в базе знаний этого нет”). |
+| `graph_accuracy` | 0.75 | Threshold is defined, but `admin eval` does not compute this metric yet — it is always reported as `n/a`. |
 
 The dataset (`tests/fixtures/eval.json`) has a `documents` map (title → expected
 type + required attributes) and a `questions` list (in-corpus questions with
@@ -701,8 +706,9 @@ Integration tests are marked `integration` (deselect with `-m "not integration"`
 The `pg_dsn` fixture uses `KB_TEST_DSN` if set (CI’s Postgres service), otherwise it
 spins up `pgvector/pgvector:0.8.2-pg18` via testcontainers, applying migrations
 once; if Docker/the image is unavailable, those tests **skip cleanly**. Each test
-gets a truncated database (`pool` fixture). Unit tests use a deterministic
-`HashingEmbedder` fake (`tests/fakes.py`) instead of a real embedding backend.
+gets a truncated database (`pool` fixture). Integration tests use a deterministic
+`HashingEmbedder` fake (`tests/fakes.py`, via the `fake_embedder` fixture) instead of a
+real embedding backend.
 
 ### Behavioural eval harness (`scripts/eval_hw.py`)
 
@@ -796,9 +802,10 @@ Everything paid runs through OpenRouter. There are exactly three call sites:
 **What actually costs money.** The recurring cost is the **agent loop**: each question
 can trigger several `haiku` calls, and every round re-sends the static prefix (system
 prompt + tool schemas + facts) plus the growing tool-result context. **Embeddings are
-negligible** — `openai/text-embedding-3-small` is ~$0.02 / 1M tokens, so a query embed
-(~20 tokens) is a fraction of a cent and a full corpus ingest is well under a cent.
-Extraction is a small one-time cost per document.
+negligible** — the default `EMBED_BACKEND=local` (`voyage-4-nano` ONNX on CPU) is free;
+even on `EMBED_BACKEND=openrouter`, embedding a query (~20 tokens) is a fraction of a
+cent and a full corpus ingest is well under a cent. Extraction is a small one-time cost
+per document.
 
 **Levers, biggest first:**
 
