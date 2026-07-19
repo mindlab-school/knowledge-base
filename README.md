@@ -45,8 +45,10 @@ It answers two classes of question:
 - [Admin & Maintenance CLI](#admin--maintenance-cli)
 - [Claude Code Plugin](#claude-code-plugin)
 - [Testing & Quality Gates](#testing--quality-gates)
+  - [Behavioural eval harness](#behavioural-eval-harness-scriptseval_hwpy)
 - [Continuous Integration](#continuous-integration)
 - [Deployment](#deployment)
+- [Cost & Token Usage](#cost--token-usage)
 - [Troubleshooting](#troubleshooting)
 - [Project Layout](#project-layout)
 - [Design Decisions & Invariants](#design-decisions--invariants)
@@ -253,6 +255,11 @@ supports, AND-combined:
 - **`structured.py` — metadata queries.** `build_document_where` is a pure function
   turning a filter dict into a parameterised `WHERE` fragment (easy to unit-test);
   `query_documents` returns metadata (no `raw_content`), newest first, capped at 15.
+  It is defensive against malformed tool arguments: ISO date filters
+  (`created_before`/`created_after`, `<attr>_before`/`_after`) are parsed to
+  `datetime.date` objects (a bare string would raise an `asyncpg` `DataError`), and a
+  non-dict `filters` (e.g. a stray string) yields an empty `WHERE` instead of raising.
+  The agent's tool layer additionally coerces a JSON-string `filters` into an object.
 - **`entities.py` — entity cards.** Resolves a name by canonical match
   (`lower(trim(name))`), falling back to a fuzzy `ILIKE`, then returns the entity,
   its mentioning documents (with roles) and its graph neighbourhood.
@@ -684,11 +691,11 @@ make check            # lint + typecheck + unit
 - **`tests/unit/`** — pure, no external services:
   `test_chunking`, `test_config_and_registry`, `test_embeddings_math`,
   `test_extraction`, `test_prompt_cache`, `test_rrf`, `test_split_message`,
-  `test_structured_filters`, `test_urls`.
+  `test_structured_filters`, `test_tool_filters`, `test_urls`.
 - **`tests/integration/`** — a real PostgreSQL + pgvector container:
   `test_chat_flow`, `test_facts_bitemporal`, `test_graph`,
-  `test_pipeline_idempotency`, `test_search_hybrid`, `test_sessions`,
-  `test_whitelist`.
+  `test_pipeline_idempotency`, `test_search_hybrid`, `test_structured_dates`,
+  `test_sessions`, `test_whitelist`.
 
 Integration tests are marked `integration` (deselect with `-m "not integration"`).
 The `pg_dsn` fixture uses `KB_TEST_DSN` if set (CI’s Postgres service), otherwise it
@@ -696,6 +703,34 @@ spins up `pgvector/pgvector:0.8.2-pg18` via testcontainers, applying migrations
 once; if Docker/the image is unavailable, those tests **skip cleanly**. Each test
 gets a truncated database (`pool` fixture). Unit tests use a deterministic
 `HashingEmbedder` fake (`tests/fakes.py`) instead of a real embedding backend.
+
+### Behavioural eval harness (`scripts/eval_hw.py`)
+
+A separate, **behavioural** benchmark that drives the real agent loop end-to-end
+against a fixed corpus and grades how it answers. Unlike `admin eval` (retrieval/
+extraction metrics against `eval.json`), this measures the *answering* behaviour —
+correct answers, false refusals, unnecessary clarifications, hallucinations, and
+correct refusals of out-of-corpus questions — and needs an `OPENROUTER_API_KEY`
+(it makes real model calls).
+
+It runs the agent **in-process** (no HTTP server) and never persists chat messages,
+so it does not consume the month-to-date spend budget. Fixed data under
+`tests/fixtures/` keeps runs comparable across system changes:
+
+- `hw_corpus/` — a 13-document snapshot + `manifest.json` (URL/title provenance).
+- `hw_questions.json` — 100 questions with expected answers and an `out_of_corpus`
+  flag (94 in-corpus + 6 that must be refused).
+
+```bash
+make eval-ingest                 # reset DB + ingest the corpus snapshot (fresh load)
+make eval-run ARGS="--judge"     # ask all 100 questions, LLM-graded report
+make eval                        # ingest + run + graded report in one go
+uv run python scripts/eval_hw.py run --only 31,33 --concurrency 6   # a subset
+```
+
+Results are written to `experiments/hw_eval_results.json` (git-ignored). See
+`experiments/` for the two write-ups produced with this harness (a 100-question
+evaluation and a round of prompt optimisation).
 
 ---
 
@@ -748,6 +783,40 @@ bot). Compose sets `DATABASE_URL`/`BACKEND_URL` for the containers automatically
 
 ---
 
+## Cost & Token Usage
+
+Everything paid runs through OpenRouter. There are exactly three call sites:
+
+| Call site | When | Model | Volume |
+|---|---|---|---|
+| **Agent loop** (`agent/loop.py`) | every question | `AGENT_MODEL` (haiku) | up to `MAX_TOOL_ROUNDS + 1` = **6 model calls per question** |
+| **Extraction** (`ingestion/extraction.py`) | once per document on ingest | `EXTRACTION_MODEL` (haiku) | 1 call (+1 retry on failure) |
+| **Embeddings** (`ingestion/embeddings.py`) | per chunk on ingest, per query on search | `EMBED_MODEL` | 1 vector each — **free** on `EMBED_BACKEND=local` |
+
+**What actually costs money.** The recurring cost is the **agent loop**: each question
+can trigger several `haiku` calls, and every round re-sends the static prefix (system
+prompt + tool schemas + facts) plus the growing tool-result context. **Embeddings are
+negligible** — `openai/text-embedding-3-small` is ~$0.02 / 1M tokens, so a query embed
+(~20 tokens) is a fraction of a cent and a full corpus ingest is well under a cent.
+Extraction is a small one-time cost per document.
+
+**Levers, biggest first:**
+
+- **Fewer tool rounds.** `MAX_TOOL_ROUNDS = 5` is the ceiling; most content questions
+  resolve in 1–2 rounds. Lowering it caps the worst case directly.
+- **Prompt caching.** With `PROMPT_CACHE=auto`, the static prefix is cached once it
+  reaches `CACHE_MIN_TOKENS` (Anthropic Haiku minimum 4096). Below that, the prefix is
+  re-billed every round — a reason to keep the loop short.
+- **Free embeddings / offline.** `EMBED_BACKEND=local` (voyage-4-nano ONNX on CPU)
+  removes all embedding API calls. This is about **autonomy/privacy, not money** — the
+  embedding spend is already near zero. Requires the ONNX assets and re-embedding.
+- **Spend guard.** `OR_MONTHLY_LIMIT` (default `$20`) is a soft month-to-date cap; the
+  agent refuses above it. Track real spend with `admin stats --cost`.
+- **Evaluation.** `scripts/eval_hw.py` makes many agent calls; prefer a cheap model for
+  any LLM judge and run subsets (`--only …`) rather than all 100 on every iteration.
+
+---
+
 ## Troubleshooting
 
 **`could not connect to server: Connection refused`**
@@ -792,9 +861,10 @@ export or a file instead.
 .
 ├── src/kb/               # application package (see Module layout above)
 ├── migrations/           # numbered forward-only SQL
-├── scripts/migrate.py    # migration runner
+├── scripts/              # migrate.py (migrations) + eval_hw.py (behavioural eval)
 ├── plugin/               # Claude Code plugin: MCP server, skill, commands, manifests
-├── tests/                # unit/ integration/ fixtures/ + conftest, fakes
+├── tests/                # unit/ integration/ fixtures/ (incl. hw_corpus) + conftest, fakes
+├── experiments/          # eval write-ups (git-ignored results JSON)
 ├── docker/entrypoint.sh  # process selector (api | bot)
 ├── Dockerfile            # single image for both processes
 ├── docker-compose.yml    # db + api/bot profiles
