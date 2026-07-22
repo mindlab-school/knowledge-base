@@ -9,37 +9,25 @@ from __future__ import annotations
 
 import hmac
 import logging
-import os
-import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from kb.agent import loop as agent_loop
 from kb.config import get_settings
 from kb.db.pool import close_pool, get_pool
 from kb.db.repo import conversations as conversations_repo
 from kb.db.repo import users as users_repo
-from kb.ingestion.pipeline import IngestResult, ingest_source
-from kb.ingestion.session import (
-    append_text,
-    get_active_session,
-    maybe_autoclose,
-    note_document,
-    toggle_session,
-)
-from kb.ingestion.sources.files import FileSource, is_supported, telegram_file_source
-from kb.ingestion.sources.urls import UrlSource
+from kb.ingestion.pipeline import IngestResult
 from kb.search import entities as entities_search
 from kb.search import semantic, structured
+from kb.services import chat as chat_service
 from kb.services import facts as facts_service
+from kb.services import ingest as ingest_service
 
-MAX_FILE_SIZE = 20 * 1024 * 1024
 FORBIDDEN_MESSAGE = "нет доступа, обратитесь к администратору"
 UNAUTHENTICATED_MESSAGE = "неверный или отсутствующий ключ доступа"
 SECRET_HEADER = "X-KB-Secret"
@@ -159,22 +147,7 @@ async def health() -> dict[str, str]:
 @app.post("/chat")
 async def chat(request: ChatRequest) -> dict[str, str]:
     user = await _require_user(request.telegram_id)
-    pool = await get_pool()
-    await maybe_autoclose(int(user["id"]), pool=pool)
-
-    async with pool.acquire() as conn:
-        conversation_id = await conversations_repo.get_or_create_active(conn, int(user["id"]))
-        history = await conversations_repo.last_messages(conn, conversation_id, limit=8)
-
-    result = await agent_loop.answer(
-        request.text, history=history, conversation_id=conversation_id, pool=pool
-    )
-
-    async with pool.acquire() as conn, conn.transaction():
-        await conversations_repo.add_message(conn, conversation_id, "user", request.text)
-        await conversations_repo.add_message(
-            conn, conversation_id, "assistant", result.answer, usage=result.usage
-        )
+    result = await chat_service.answer_question(int(user["id"]), request.text)
     return {"answer": result.answer}
 
 
@@ -196,56 +169,29 @@ async def ingest_file(
 ) -> dict[str, Any]:
     user = await _require_user(telegram_id)
     name = filename or file.filename or "upload"
-    if not is_supported(name):
-        raise HTTPException(status_code=400, detail=f"неподдерживаемый тип файла: {name}")
-
     data = await file.read()
-    if len(data) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="файл превышает 20 MB")
-
-    pool = await get_pool()
-    await maybe_autoclose(int(user["id"]), pool=pool)
-    active = await get_active_session(int(user["id"]), pool=pool)
-    session_id = int(active["id"]) if active else None
-
-    with tempfile.NamedTemporaryFile(suffix=Path(name).suffix, delete=False) as tmp:
-        tmp.write(data)
-        tmp_path = tmp.name
     try:
-        source = (
-            telegram_file_source(tmp_path, name, int(user["id"]))
-            if origin == "telegram"
-            else FileSource(
-                tmp_path, source_path=f"file:{user['id']}:{name}", title=Path(name).stem
-            )
+        result = await ingest_service.ingest_uploaded_file(
+            int(user["id"]), data, name, origin=origin
         )
-        result = await ingest_source(source, session_id=session_id, pool=pool)
-    finally:
-        os.unlink(tmp_path)
-
-    if session_id is not None:
-        await note_document(session_id, pool=pool)
+    except ingest_service.UnsupportedFileType as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ingest_service.FileTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     return _card(result)
 
 
 @app.post("/ingest/url")
 async def ingest_url(request: UrlRequest) -> dict[str, Any]:
     user = await _require_user(request.telegram_id)
-    pool = await get_pool()
-    await maybe_autoclose(int(user["id"]), pool=pool)
-    active = await get_active_session(int(user["id"]), pool=pool)
-    session_id = int(active["id"]) if active else None
-    result = await ingest_source(UrlSource(request.url), session_id=session_id, pool=pool)
-    if session_id is not None:
-        await note_document(session_id, pool=pool)
+    result = await ingest_service.ingest_web_url(int(user["id"]), request.url)
     return _card(result)
 
 
 @app.post("/ingest/session")
 async def ingest_session(request: SessionRequest) -> dict[str, Any]:
     user = await _require_user(request.telegram_id)
-    pool = await get_pool()
-    toggle = await toggle_session(int(user["id"]), pool=pool)
+    toggle = await ingest_service.toggle_capture_session(int(user["id"]))
     if toggle.state == "opened":
         return {"state": "opened"}
     close = toggle.close
@@ -261,12 +207,10 @@ async def ingest_session(request: SessionRequest) -> dict[str, Any]:
 @app.post("/ingest/message")
 async def ingest_message(request: MessageRequest) -> dict[str, int]:
     user = await _require_user(request.telegram_id)
-    pool = await get_pool()
-    await maybe_autoclose(int(user["id"]), pool=pool)
-    active = await get_active_session(int(user["id"]), pool=pool)
-    if active is None:
-        raise HTTPException(status_code=409, detail="нет активной сессии набора")
-    seq = await append_text(int(active["id"]), request.text, pool=pool)
+    try:
+        seq = await ingest_service.buffer_message(int(user["id"]), request.text)
+    except ingest_service.NoActiveSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"seq": seq}
 
 
