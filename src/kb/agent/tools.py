@@ -9,6 +9,7 @@ document body) to keep the context small.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import asyncpg
@@ -17,6 +18,8 @@ from kb.config import Settings, get_settings
 from kb.ingestion.embeddings import Embedder, make_embedder
 from kb.search import entities as entities_search
 from kb.search import semantic, structured
+
+logger = logging.getLogger("kb.agent")
 
 DOCUMENT_BODY_LIMIT = 8_000
 _DOCUMENT_CAP = structured.DEFAULT_DOCUMENT_LIMIT
@@ -143,6 +146,21 @@ def _coerce_filters(value: Any) -> dict[str, Any] | None:
     return None
 
 
+def _coerce_int(value: Any, default: int) -> int:
+    """Coerce a numeric tool argument to an ``int``, falling back to ``default``.
+
+    The model sometimes sends numbers as JSON strings, ``null``, or non-numeric
+    text; mirror :func:`_coerce_filters` by never letting a bad value raise.
+    ``bool`` is rejected so a stray ``true``/``false`` does not become ``1``/``0``.
+    """
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 async def _search_knowledge_base(
     args: dict[str, Any], *, pool: asyncpg.Pool, embedder: Embedder, settings: Settings
 ) -> str:
@@ -158,7 +176,12 @@ async def _search_knowledge_base(
 async def _query_documents(args: dict[str, Any], *, pool: asyncpg.Pool) -> str:
     filters = _coerce_filters(args.get("filters")) or {}
     documents = await structured.query_documents(filters, limit=_DOCUMENT_CAP, pool=pool)
-    total = await structured.count_documents(filters, pool=pool)
+    # A COUNT is only needed when the page is full: only then can the true total
+    # exceed what was returned. A short page is already the whole result set.
+    if len(documents) == _DOCUMENT_CAP:
+        total = await structured.count_documents(filters, pool=pool)
+    else:
+        total = len(documents)
     payload: dict[str, Any] = {"documents": documents, "applied_filters": filters}
     if total > _DOCUMENT_CAP:
         payload["total"] = total
@@ -170,7 +193,7 @@ async def _explore_entity(args: dict[str, Any], *, pool: asyncpg.Pool) -> str:
     name = str(args.get("name", "")).strip()
     if not name:
         return _json({"error": "не указано имя сущности"})
-    depth = int(args.get("depth", 1))
+    depth = _coerce_int(args.get("depth"), 1)
     card = await entities_search.explore_entity(name, depth=depth, pool=pool)
     if card is None:
         return _json({"found": False, "name": name})
@@ -178,7 +201,9 @@ async def _explore_entity(args: dict[str, Any], *, pool: asyncpg.Pool) -> str:
 
 
 async def _get_document(args: dict[str, Any], *, pool: asyncpg.Pool) -> str:
-    document_id = int(args.get("document_id", 0))
+    document_id = _coerce_int(args.get("document_id"), 0)
+    if document_id <= 0:
+        return _json({"found": False, "document_id": document_id})
     document = await structured.get_document(document_id, pool=pool)
     if document is None:
         return _json({"found": False, "document_id": document_id})
@@ -219,12 +244,20 @@ async def dispatch(
     if not isinstance(args, dict):
         args = {}
 
-    if name == "search_knowledge_base":
-        return await _search_knowledge_base(args, pool=pool, embedder=embedder, settings=settings)
-    if name == "query_documents":
-        return await _query_documents(args, pool=pool)
-    if name == "explore_entity":
-        return await _explore_entity(args, pool=pool)
-    if name == "get_document":
-        return await _get_document(args, pool=pool)
+    try:
+        if name == "search_knowledge_base":
+            return await _search_knowledge_base(
+                args, pool=pool, embedder=embedder, settings=settings
+            )
+        if name == "query_documents":
+            return await _query_documents(args, pool=pool)
+        if name == "explore_entity":
+            return await _explore_entity(args, pool=pool)
+        if name == "get_document":
+            return await _get_document(args, pool=pool)
+    except Exception as exc:
+        # Resilience boundary: a failing tool must not crash the answer loop —
+        # return an error result the model can recover from, like the parse case.
+        logger.exception("tool %s failed", name)
+        return _json({"error": f"ошибка инструмента: {exc}"})
     return _json({"error": f"неизвестный инструмент: {name}"})
