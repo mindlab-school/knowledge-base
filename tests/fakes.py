@@ -97,7 +97,7 @@ class HashingEmbedder:
         return [self._vector(text) for text in texts]
 
     async def embed_query(self, text: str) -> list[float]:
-        from kb.ingestion.embeddings import apply_query_prefix
+        from kb.embeddings import apply_query_prefix
 
         return self._vector(apply_query_prefix(text))
 

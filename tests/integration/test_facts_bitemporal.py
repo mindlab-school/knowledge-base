@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from kb.db.repo import facts as facts_repo
-from kb.search import facts as facts_service
+from kb.services import facts as facts_service
 
 pytestmark = pytest.mark.integration
 

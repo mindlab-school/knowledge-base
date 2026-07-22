@@ -27,9 +27,9 @@ from kb.agent.tools import TOOLS
 from kb.config import Settings, get_settings
 from kb.db.pool import get_pool
 from kb.db.repo import conversations as conversations_repo
-from kb.ingestion.embeddings import Embedder, make_embedder
+from kb.embeddings import Embedder, make_embedder
 from kb.llm.client import LLMClient, response_usage
-from kb.search import facts as facts_service
+from kb.services import facts as facts_service
 
 logger = logging.getLogger("kb.agent")
 

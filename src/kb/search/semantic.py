@@ -18,7 +18,7 @@ from pgvector import HalfVector
 
 from kb.config import Settings, get_settings
 from kb.db.pool import get_pool
-from kb.ingestion.embeddings import Embedder, make_embedder
+from kb.embeddings import Embedder, make_embedder
 from kb.search.structured import build_document_where
 
 RRF_K = 60

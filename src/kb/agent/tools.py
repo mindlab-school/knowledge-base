@@ -15,7 +15,7 @@ from typing import Any
 import asyncpg
 
 from kb.config import Settings, get_settings
-from kb.ingestion.embeddings import Embedder, make_embedder
+from kb.embeddings import Embedder, make_embedder
 from kb.search import entities as entities_search
 from kb.search import semantic, structured
 

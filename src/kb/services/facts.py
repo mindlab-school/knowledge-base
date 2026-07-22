@@ -9,16 +9,14 @@ that topic, otherwise a slug is built from the first significant words.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import asyncpg
 import numpy as np
 
 from kb.db.pool import get_pool
 from kb.db.repo import facts as facts_repo
-
-if TYPE_CHECKING:
-    from kb.ingestion.embeddings import Embedder
+from kb.embeddings import Embedder
 
 TOPIC_SIMILARITY_THRESHOLD = 0.75
 

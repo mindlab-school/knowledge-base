@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from kb.ingestion.embeddings import (
+from kb.embeddings import (
     QUERY_PREFIX,
     apply_query_prefix,
     truncate_and_renormalize,

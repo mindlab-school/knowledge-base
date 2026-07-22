@@ -32,7 +32,7 @@ from typing import Any
 from kb.agent.loop import answer as agent_answer
 from kb.config import Settings, get_settings
 from kb.db.pool import close_pool, get_pool
-from kb.ingestion.embeddings import Embedder, make_embedder
+from kb.embeddings import Embedder, make_embedder
 from kb.ingestion.pipeline import ingest_loaded
 from kb.ingestion.sources.base import LoadedDoc
 from kb.llm.client import LLMClient

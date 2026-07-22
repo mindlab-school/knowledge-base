@@ -11,7 +11,7 @@ from kb.doc_types.registry import (
     is_known_type,
     type_descriptions,
 )
-from kb.search.facts import slugify_topic
+from kb.services.facts import slugify_topic
 
 
 def test_settings_defaults() -> None:
