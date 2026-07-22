@@ -55,14 +55,14 @@ WITH RECURSIVE walk(id, path, d) AS (
     JOIN LATERAL (
         SELECT CASE WHEN l.source_id = w.id THEN l.target_id ELSE l.source_id END AS nid
         FROM document_links l
-        WHERE l.source_id = w.id OR l.target_id = w.id
+        WHERE (l.source_id = w.id OR l.target_id = w.id) AND l.invalid_at IS NULL
     ) nb ON TRUE
     WHERE w.d < $2 AND NOT (nb.nid = ANY(w.path))
 )
 SELECT d.id, d.title, d.doc_type, d.version, MIN(walk.d) AS depth,
        NOT EXISTS (
            SELECT 1 FROM document_links s
-           WHERE s.kind = 'supersedes' AND s.target_id = d.id
+           WHERE s.kind = 'supersedes' AND s.target_id = d.id AND s.invalid_at IS NULL
        ) AS current
 FROM walk
 JOIN documents d ON d.id = walk.id

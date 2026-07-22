@@ -46,7 +46,7 @@ _DOCUMENTS_SQL = """
 SELECT d.id, d.title, d.doc_type, em.role
 FROM entity_mentions em
 JOIN documents d ON d.id = em.document_id
-WHERE em.entity_id = $1
+WHERE em.entity_id = $1 AND em.invalid_at IS NULL
 ORDER BY d.id
 """
 

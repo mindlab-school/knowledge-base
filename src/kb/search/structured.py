@@ -117,7 +117,8 @@ def build_document_where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
             base = (
                 "EXISTS (SELECT 1 FROM entity_mentions em "
                 "JOIN entities e ON e.id = em.entity_id "
-                f"WHERE em.document_id = d.id AND e.canonical = {where.placeholder(canonical)}"
+                "WHERE em.document_id = d.id AND em.invalid_at IS NULL "
+                f"AND e.canonical = {where.placeholder(canonical)}"
             )
             if role:
                 base += f" AND em.role = {where.placeholder(str(role))}"
@@ -185,7 +186,7 @@ _MENTIONS_SQL = """
 SELECT e.entity_type, e.name, em.role
 FROM entity_mentions em
 JOIN entities e ON e.id = em.entity_id
-WHERE em.document_id = $1
+WHERE em.document_id = $1 AND em.invalid_at IS NULL
 ORDER BY e.id
 """
 
