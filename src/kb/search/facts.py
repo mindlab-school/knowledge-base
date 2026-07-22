@@ -127,10 +127,3 @@ async def delete_fact(topic: str, *, pool: asyncpg.Pool | None = None) -> bool:
     pool = pool or await get_pool()
     async with pool.acquire() as conn, conn.transaction():
         return await facts_repo.soft_delete(conn, topic)
-
-
-async def fact_history(topic: str, *, pool: asyncpg.Pool | None = None) -> list[dict[str, Any]]:
-    """Return every version of a topic ordered oldest-first."""
-    pool = pool or await get_pool()
-    async with pool.acquire() as conn:
-        return await facts_repo.history(conn, topic)

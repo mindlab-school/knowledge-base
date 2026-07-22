@@ -21,6 +21,7 @@ import asyncpg
 from kb.agent import loop as agent_loop
 from kb.agent.loop import NO_ANSWER
 from kb.db.pool import close_pool, get_pool
+from kb.db.repo import conversations as conversations_repo
 from kb.db.repo import documents as documents_repo
 from kb.db.repo import entities as entities_repo
 from kb.db.repo import facts as facts_repo
@@ -70,11 +71,8 @@ async def cmd_stats(args: argparse.Namespace, conn: asyncpg.Connection) -> None:
 
 
 async def _stats_cost(conn: asyncpg.Connection) -> None:
-    total = await conn.fetchval(
-        "SELECT COALESCE(SUM((usage->>'cost')::float),0) FROM messages "
-        "WHERE usage ? 'cost' AND created_at >= date_trunc('month', now())"
-    )
-    print(f"month-to-date cost: ${float(total):.4f}")
+    total = await conversations_repo.month_to_date_cost(conn)
+    print(f"month-to-date cost: ${total:.4f}")
     print("by model:")
     for row in await conn.fetch(
         "SELECT usage->>'model' model, SUM((usage->>'cost')::float) cost, count(*) n "

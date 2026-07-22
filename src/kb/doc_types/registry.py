@@ -47,11 +47,6 @@ def type_descriptions() -> dict[str, str]:
     return {name: inspect.getdoc(model) or "" for name, model in DOC_TYPE_REGISTRY.items()}
 
 
-def attribute_schema(doc_type: str) -> dict[str, Any]:
-    """Return the JSON schema of the attributes for ``doc_type``."""
-    return get_model(doc_type).model_json_schema()
-
-
 def attribute_schemas() -> dict[str, dict[str, Any]]:
     """Return ``{doc_type: json_schema}`` for every registered type."""
     return {name: model.model_json_schema() for name, model in DOC_TYPE_REGISTRY.items()}

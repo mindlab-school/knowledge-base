@@ -194,8 +194,9 @@ ingestion / doc_types → db/repo
 ```
 
 - The **core is channel-agnostic**; Telegram and MCP are thin clients.
-- **Writing SQL lives only in `src/kb/db/repo`**; the `search` package may also
-  read. `channels/telegram.py` imports only `httpx`, `config` and the Telegram SDK.
+- **Write SQL lives only in `src/kb/db/repo`**; the `search/*` read layer and the
+  admin CLI compose their own read queries against the tables they report on.
+  `channels/telegram.py` imports only `httpx`, `config` and the Telegram SDK.
 - The original `raw_content` is the **source of truth**; chunks, embeddings,
   attributes, mentions and edges are all derived and recreated on change.
 
@@ -448,6 +449,7 @@ codebase reads `os.environ` directly.
 | `TELEGRAM_BOT_TOKEN` | — | Required for the bot. |
 | `DATABASE_URL` | `postgresql://kb:kb@localhost:5432/kb` | PostgreSQL DSN. |
 | `BACKEND_URL` | `http://localhost:8000` | Backend URL the bot calls. |
+| `BACKEND_SHARED_SECRET` | *(empty)* | Shared secret for backend auth. When set, every endpoint except `/health` requires a matching `X-KB-Secret` header. **Set it in production.** |
 | `AGENT_MODEL` | `anthropic/claude-haiku-4.5` | Model that drives the agent loop. |
 | `OR_MODEL_VARIANT` | *(empty)* | Appended to the agent slug: empty, `:exacto` (tool-calling accuracy), or `:nitro`. |
 | `AGENT_EFFORT` | *(empty)* | Reasoning effort — only for adaptive-thinking models (e.g. Sonnet 5); leave empty for Haiku. |
@@ -468,6 +470,14 @@ codebase reads `os.environ` directly.
 > and re-embedding everything. The local backend truncates the native 2048-dim
 > vectors to `EMBED_DIM`; the OpenRouter backend requests `dimensions=EMBED_DIM`
 > directly (verify your embedding model supports that size).
+
+> **Security note — backend auth.** By default the backend is unauthenticated at
+> the transport level and relies on the `telegram_id` whitelist alone. Setting
+> `BACKEND_SHARED_SECRET` turns on a required `X-KB-Secret` header on every
+> endpoint except `/health`; requests without a matching secret are rejected.
+> **Production deployments must set it.** The bot sends the header from the same
+> setting; the Claude Code MCP server reads its copy from `KB_SHARED_SECRET` (see
+> [Claude Code Plugin](#claude-code-plugin)).
 
 ---
 
@@ -668,8 +678,9 @@ into Claude Code.
 ```
 
 Set `KB_BACKEND_URL` (the backend) and `KB_USER_ID` (a whitelisted `telegram_id`)
-before use — the MCP server (`plugin/mcp/server.py`) reads both from the
-environment (see `plugin/.mcp.json`). The `mcp` extra must be installed.
+before use — and, if the backend enforces `BACKEND_SHARED_SECRET`, `KB_SHARED_SECRET`
+(sent as the `X-KB-Secret` header). The MCP server (`plugin/mcp/server.py`) reads
+them from the environment (see `plugin/.mcp.json`). The `mcp` extra must be installed.
 
 **MCP tools** (each is a single HTTP call to the backend): `kb_search`,
 `kb_query_documents`, `kb_explore_entity`, `kb_get_document`, `kb_list_facts`,
@@ -893,8 +904,10 @@ export or a file instead.
 - **Extraction never dies.** Any failure degrades to `generic`/`failed`; the
   document is stored and remains searchable, and can be re-extracted later.
 - **One place for settings.** Only `config.py` reads the environment.
-- **Writing SQL only in `db/repo`.** The rest of the code composes reads and calls
-  repositories; this keeps persistence auditable in one place.
+- **Write SQL only in `db/repo`.** Every INSERT/UPDATE/DELETE goes through a
+  repository, keeping persistence auditable in one place. Read queries are *not*
+  centralised: the `search/*` layer and the admin CLI compose their own SELECTs
+  against the tables they report on.
 - **Bitemporal, not destructive.** Facts and entity relations invalidate old
   versions instead of deleting them, preserving history and provenance.
 - **Small agent context by design.** Tool results are capped (4 chunks, 15
