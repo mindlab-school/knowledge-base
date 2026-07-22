@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from kb.config import Settings
-from kb.ingestion.embeddings import make_embedder, reset_embedder_cache
+from kb.embeddings import make_embedder, reset_embedder_cache
 
 
 @pytest.fixture(autouse=True)

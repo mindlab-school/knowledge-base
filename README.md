@@ -166,6 +166,7 @@ Files / URL ──▶ Ingestion: parse ▶ LLM extract ▶ chunk ▶ embed ▶ w
 ```
 src/kb/
 ├── config.py            # single source of settings (reads .env / env once)
+├── embeddings.py        # neutral Embedder leaf (local ONNX / OpenRouter); shared
 ├── db/
 │   ├── pool.py          # asyncpg pool; registers pgvector + JSONB codecs
 │   └── repo/            # ALL writing SQL lives here (documents, chunks, entities,
@@ -176,24 +177,30 @@ src/kb/
 │   ├── sources/         # file / url / telegram source adapters → LoadedDoc
 │   ├── extraction.py    # LLM structure extraction (type/attrs/entities/…)
 │   ├── chunking.py      # pure per-type chunkers
-│   ├── embeddings.py    # local ONNX / OpenRouter embedders
 │   ├── pipeline.py      # source → extract → chunk → embed → write
 │   └── session.py       # /ingest capture-session orchestration
-├── search/              # read side: semantic, structured, entities, graph, facts
+├── search/              # read side: semantic, structured, entities, graph
+├── services/            # write orchestration: facts (bitemporal upsert + topics)
 ├── agent/               # tool schemas + dispatcher + the tool-use loop + prompts
 ├── api/app.py           # FastAPI backend (the only HTTP surface over the core)
 ├── channels/telegram.py # aiogram bot (thin HTTP client)
 └── cli/                 # ingest, admin, reextract command-line entry points
 ```
 
-**Dependency direction** (enforced by convention, checked in review):
+**Dependency direction** (enforced by convention; the layering guard is a test):
 
 ```
 channels → api → agent → search → db/repo → db/pool
+agent / api / ingestion → services → db/repo
 ingestion / doc_types → db/repo
+embeddings → config                 # neutral leaf; shared by ingestion, search, agent, services
 ```
 
 - The **core is channel-agnostic**; Telegram and MCP are thin clients.
+- **`search` and `ingestion` never import each other.** The shared `Embedder`
+  lives in the neutral `kb/embeddings.py` and fact write-orchestration in
+  `kb/services/facts.py`, so the read and ingest layers stay independent.
+  `tests/unit/test_layering.py` fails the build on any cross-import.
 - **Write SQL lives only in `src/kb/db/repo`**; the `search/*` read layer and the
   admin CLI compose their own read queries against the tables they report on.
   `channels/telegram.py` imports only `httpx`, `config` and the Telegram SDK.
@@ -272,7 +279,6 @@ supports, AND-combined:
   at `MAX_DEPTH = 3` and `MAX_NODES = 40`, cycle-safe via a visited-path array.
   `related_documents` walks `document_links` and flags versions superseded by a
   `supersedes` link (`current = false`).
-- **`facts.py` — fact orchestration** (see [Facts](#facts)).
 
 ### Ingestion internals (`src/kb/ingestion/`)
 
@@ -290,7 +296,7 @@ supports, AND-combined:
   action-items blocks (date + participants repeated in each); `regulation` /
   `instruction` → by markdown headings; everything else → paragraph packing.
   Markdown tables are never split across chunks.
-- **Embeddings (`embeddings.py`).** One `Embedder` interface, 1024-dim unit
+- **Embeddings (`kb/embeddings.py`, shared).** One `Embedder` interface, 1024-dim unit
   vectors. `local` = `voyage-4-nano` ONNX (int8) on CPU — native 2048 dims are
   Matryoshka-truncated to `EMBED_DIM` and renormalised; `onnxruntime`/`tokenizers`
   are imported only on first use. `openrouter` = the `/embeddings` endpoint with an
@@ -306,8 +312,9 @@ supports, AND-combined:
 
 ### Facts
 
-Facts are compact, one-per-topic records of current business context. They carry
-**no embeddings or chunks** — they go into the agent context whole.
+Facts are compact, one-per-topic records of current business context, orchestrated
+by `src/kb/services/facts.py`. They carry **no embeddings or chunks** — they go into
+the agent context whole.
 
 - **Topic assignment without an LLM.** On session close the buffered text is
   embedded and compared (cosine) to existing active facts; a match above
@@ -808,7 +815,7 @@ Everything paid runs through OpenRouter. There are exactly three call sites:
 |---|---|---|---|
 | **Agent loop** (`agent/loop.py`) | every question | `AGENT_MODEL` (haiku) | up to `MAX_TOOL_ROUNDS + 1` = **6 model calls per question** |
 | **Extraction** (`ingestion/extraction.py`) | once per document on ingest | `EXTRACTION_MODEL` (haiku) | 1 call (+1 retry on failure) |
-| **Embeddings** (`ingestion/embeddings.py`) | per chunk on ingest, per query on search | `EMBED_MODEL` | 1 vector each — **free** on `EMBED_BACKEND=local` |
+| **Embeddings** (`embeddings.py`) | per chunk on ingest, per query on search | `EMBED_MODEL` | 1 vector each — **free** on `EMBED_BACKEND=local` |
 
 **What actually costs money.** The recurring cost is the **agent loop**: each question
 can trigger several `haiku` calls, and every round re-sends the static prefix (system

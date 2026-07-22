@@ -16,8 +16,8 @@ import asyncpg
 from kb.config import Settings, get_settings
 from kb.db.pool import get_pool
 from kb.db.repo import sessions as sessions_repo
-from kb.ingestion.embeddings import Embedder, make_embedder
-from kb.search import facts as facts_service
+from kb.embeddings import Embedder, make_embedder
+from kb.services import facts as facts_service
 
 AUTOCLOSE_IDLE_MINUTES = 60
 

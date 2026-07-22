@@ -19,8 +19,8 @@ from kb.db.pool import get_pool
 from kb.db.repo import chunks as chunks_repo
 from kb.db.repo import documents as documents_repo
 from kb.db.repo import entities as entities_repo
+from kb.embeddings import Embedder, make_embedder
 from kb.ingestion.chunking import chunk_document
-from kb.ingestion.embeddings import Embedder, make_embedder
 from kb.ingestion.extraction import ExtractionResult, extract_structure
 from kb.ingestion.sources.base import LoadedDoc, Source
 from kb.llm.client import LLMClient

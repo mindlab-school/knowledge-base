@@ -36,8 +36,8 @@ from kb.ingestion.session import (
 from kb.ingestion.sources.files import FileSource, is_supported, telegram_file_source
 from kb.ingestion.sources.urls import UrlSource
 from kb.search import entities as entities_search
-from kb.search import facts as facts_service
 from kb.search import semantic, structured
+from kb.services import facts as facts_service
 
 MAX_FILE_SIZE = 20 * 1024 * 1024
 FORBIDDEN_MESSAGE = "нет доступа, обратитесь к администратору"
