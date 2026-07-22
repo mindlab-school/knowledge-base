@@ -14,7 +14,12 @@ Row = dict[str, Any]
 
 
 async def get_or_create_active(conn: asyncpg.Connection, user_id: int) -> int:
-    """Return the id of the user's active conversation, creating one if needed."""
+    """Return the id of the user's active conversation, creating one if needed.
+
+    Race-safe against concurrent first-messages: the insert defers to the
+    ``conversations_one_active`` partial unique index, so a connection that loses
+    the race reads the winner's row instead of creating a duplicate.
+    """
     record = await conn.fetchrow(
         "SELECT id FROM conversations WHERE user_id = $1 AND active ORDER BY id DESC LIMIT 1",
         user_id,
@@ -22,9 +27,21 @@ async def get_or_create_active(conn: asyncpg.Connection, user_id: int) -> int:
     if record is not None:
         return int(record["id"])
     created = await conn.fetchrow(
-        "INSERT INTO conversations (user_id) VALUES ($1) RETURNING id", user_id
+        """
+        INSERT INTO conversations (user_id) VALUES ($1)
+        ON CONFLICT (user_id) WHERE active DO NOTHING
+        RETURNING id
+        """,
+        user_id,
     )
-    return int(created["id"])
+    if created is not None:
+        return int(created["id"])
+    # Lost the race: another connection created the active conversation first.
+    record = await conn.fetchrow(
+        "SELECT id FROM conversations WHERE user_id = $1 AND active ORDER BY id DESC LIMIT 1",
+        user_id,
+    )
+    return int(record["id"])
 
 
 async def reset(conn: asyncpg.Connection, user_id: int) -> None:
