@@ -7,8 +7,9 @@ Dispatch by extension to a plain-text representation:
 * ``.pdf`` / ``.docx`` / ``.pptx`` — docling -> markdown (the ``parse`` extra;
   ML models load lazily, only PDF needs them).
 
-Telegram attachments reuse this adapter but store a ``tg:<filename>`` source path
-so re-sending a file with the same name becomes a new version of one document.
+Telegram attachments reuse this adapter but store a ``tg:<user_id>:<filename>``
+source path so re-sending a file with the same name becomes a new version of the
+sender's own document, without colliding with other users' uploads.
 """
 
 from __future__ import annotations
@@ -72,23 +73,27 @@ class FileSource:
         title: str | None = None,
     ) -> None:
         self._path = Path(path)
-        self._source_path = source_path or str(self._path)
+        self.source_path = source_path or str(self._path)
         self._title = title or self._path.stem
 
     async def load(self) -> LoadedDoc:
         text = await asyncio.to_thread(_parse_file, self._path)
         return LoadedDoc(
-            source_path=self._source_path,
+            source_path=self.source_path,
             title=self._title,
             text=text,
             source_kind="file",
         )
 
 
-def telegram_file_source(local_path: str | Path, original_name: str) -> FileSource:
-    """Build a FileSource for a Telegram attachment with a ``tg:`` source path."""
+def telegram_file_source(local_path: str | Path, original_name: str, user_id: int) -> FileSource:
+    """Build a FileSource for a Telegram attachment namespaced by the sender.
+
+    The ``tg:<user_id>:<filename>`` source path keeps each user's uploads
+    distinct, so two users sending ``policy.pdf`` never overwrite each other.
+    """
     return FileSource(
         local_path,
-        source_path=f"tg:{original_name.lower()}",
+        source_path=f"tg:{user_id}:{original_name.lower()}",
         title=Path(original_name).stem,
     )

@@ -63,3 +63,16 @@ async def test_telegram_filename_versioning(pool: Any, fake_embedder: Any) -> No
     second = await _ingest(pool, fake_embedder, "tg:report.pdf", "Версия два текста.")
     assert first.document_id == second.document_id
     assert second.version == 2
+
+
+async def test_same_filename_different_users_are_distinct(pool: Any, fake_embedder: Any) -> None:
+    alice = await _ingest(pool, fake_embedder, "tg:1001:policy.pdf", "Политика Алисы.")
+    bob = await _ingest(pool, fake_embedder, "tg:2002:policy.pdf", "Политика Боба.")
+    assert alice.action == "created"
+    assert bob.action == "created"
+    assert alice.document_id != bob.document_id
+
+    # Each user's re-upload of the same name maps back to their own document.
+    alice_again = await _ingest(pool, fake_embedder, "tg:1001:policy.pdf", "Политика Алисы.")
+    assert alice_again.action == "unchanged"
+    assert alice_again.document_id == alice.document_id

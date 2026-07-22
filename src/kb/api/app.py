@@ -7,17 +7,21 @@ bot, MCP server) are thin clients over these endpoints.
 
 from __future__ import annotations
 
+import hmac
+import logging
 import os
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from kb.agent import loop as agent_loop
+from kb.config import get_settings
 from kb.db.pool import close_pool, get_pool
 from kb.db.repo import conversations as conversations_repo
 from kb.db.repo import users as users_repo
@@ -37,10 +41,18 @@ from kb.search import semantic, structured
 
 MAX_FILE_SIZE = 20 * 1024 * 1024
 FORBIDDEN_MESSAGE = "нет доступа, обратитесь к администратору"
+UNAUTHENTICATED_MESSAGE = "неверный или отсутствующий ключ доступа"
+SECRET_HEADER = "X-KB-Secret"
+
+logger = logging.getLogger("kb.api.app")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    if not get_settings().backend_shared_secret:
+        logger.warning(
+            "BACKEND_SHARED_SECRET is unset: the backend HTTP surface is unauthenticated."
+        )
     await get_pool()
     try:
         yield
@@ -49,6 +61,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="KB Agent API", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def require_shared_secret(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Reject callers lacking the shared secret when one is configured.
+
+    ``GET /health`` stays public so container health checks work without the
+    secret. When ``backend_shared_secret`` is empty, auth is disabled entirely.
+    """
+    secret = get_settings().backend_shared_secret
+    exempt = request.method == "GET" and request.url.path == "/health"
+    if secret and not exempt:
+        provided = request.headers.get(SECRET_HEADER, "")
+        if not hmac.compare_digest(provided.encode("utf-8"), secret.encode("utf-8")):
+            return JSONResponse(status_code=403, content={"detail": UNAUTHENTICATED_MESSAGE})
+    return await call_next(request)
 
 
 # --- request models -----------------------------------------------------
@@ -183,9 +213,11 @@ async def ingest_file(
         tmp_path = tmp.name
     try:
         source = (
-            telegram_file_source(tmp_path, name)
+            telegram_file_source(tmp_path, name, int(user["id"]))
             if origin == "telegram"
-            else FileSource(tmp_path, source_path=name, title=Path(name).stem)
+            else FileSource(
+                tmp_path, source_path=f"file:{user['id']}:{name}", title=Path(name).stem
+            )
         )
         result = await ingest_source(source, session_id=session_id, pool=pool)
     finally:
