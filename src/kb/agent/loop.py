@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
+import openai
 
 from kb.agent import tools
 from kb.agent.prompts import (
@@ -36,6 +37,7 @@ MAX_TOOL_ROUNDS = 5
 MAX_TOKENS = 1200
 LIMIT_MESSAGE = "Лимит расходов исчерпан, обратитесь к администратору."
 NO_ANSWER = "в базе знаний этого нет"
+LLM_ERROR_MESSAGE = "Сервис временно недоступен, попробуйте позже."
 
 
 @dataclass(slots=True)
@@ -81,6 +83,12 @@ def _log_usage(model: str | None, usage: dict[str, Any]) -> None:
         usage.get("cache_write_tokens") or usage.get("cache_creation_input_tokens"),
         usage.get("cost"),
     )
+
+
+def _llm_error_result(usage: dict[str, Any], model: str | None, rounds: int) -> AnswerResult:
+    """Degrade a failed LLM call to a friendly answer, keeping usage-so-far."""
+    usage["model"] = model
+    return AnswerResult(answer=LLM_ERROR_MESSAGE, model=model, usage=usage, rounds=rounds)
 
 
 def _system_message(text: str, use_cache: bool) -> dict[str, Any]:
@@ -163,14 +171,18 @@ async def answer(
 
     for _ in range(MAX_TOOL_ROUNDS):
         rounds += 1
-        response = await llm.chat(
-            model=settings.agent_model_slug,
-            messages=messages,
-            tools=TOOLS,
-            max_tokens=MAX_TOKENS,
-            session_id=session_id,
-            reasoning=reasoning,
-        )
+        try:
+            response = await llm.chat(
+                model=settings.agent_model_slug,
+                messages=messages,
+                tools=TOOLS,
+                max_tokens=MAX_TOKENS,
+                session_id=session_id,
+                reasoning=reasoning,
+            )
+        except openai.OpenAIError:
+            logger.exception("agent LLM call failed")
+            return _llm_error_result(total_usage, model_used, rounds)
         model_used = response.model
         usage = response_usage(response)
         _accumulate_usage(total_usage, usage)
@@ -198,13 +210,17 @@ async def answer(
     else:
         # Rounds exhausted with tool calls still pending — force a text answer.
         rounds += 1
-        response = await llm.chat(
-            model=settings.agent_model_slug,
-            messages=messages,
-            max_tokens=MAX_TOKENS,
-            session_id=session_id,
-            reasoning=reasoning,
-        )
+        try:
+            response = await llm.chat(
+                model=settings.agent_model_slug,
+                messages=messages,
+                max_tokens=MAX_TOKENS,
+                session_id=session_id,
+                reasoning=reasoning,
+            )
+        except openai.OpenAIError:
+            logger.exception("agent LLM call failed")
+            return _llm_error_result(total_usage, model_used, rounds)
         model_used = response.model
         usage = response_usage(response)
         _accumulate_usage(total_usage, usage)
