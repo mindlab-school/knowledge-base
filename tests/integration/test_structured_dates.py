@@ -83,3 +83,19 @@ async def test_attribute_date_filter_executes(pool: Any, _two_dated_docs: dict[s
     rows = await structured.query_documents({"review_by_before": "2020-01-01"}, pool=pool)
     ids = {row["id"] for row in rows}
     assert ids == {_two_dated_docs["old"]}
+
+
+async def test_non_date_attribute_cast_does_not_error(pool: Any) -> None:
+    # ``status`` is a non-date attribute; a ``status_before`` filter would cast
+    # ``'active'::date`` and raise ``asyncpg.DataError`` (HTTP 500) without the
+    # guard. It must instead execute and exclude the non-date row.
+    async with pool.acquire() as conn:
+        await _insert(
+            conn,
+            title="statusy",
+            created_at=datetime(2022, 1, 1, tzinfo=UTC),
+            attributes={"status": "active"},
+        )
+    rows = await structured.query_documents({"status_before": "2026-01-01"}, pool=pool)
+    assert rows == []
+    assert await structured.count_documents({"status_before": "2026-01-01"}, pool=pool) == 0
