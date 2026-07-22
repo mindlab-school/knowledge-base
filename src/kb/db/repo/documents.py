@@ -192,14 +192,20 @@ async def resolve_document_id(conn: asyncpg.Connection, name: str) -> int | None
 async def add_link(
     conn: asyncpg.Connection, source_id: int, target_id: int, kind: str = "reference"
 ) -> None:
-    """Create a document link (no-op on self-links or duplicates)."""
+    """Activate a document link (no-op on self-links; refreshes an active duplicate).
+
+    Mirrors ``entities_repo.replace_relations``: the link is (re)activated against
+    the active partial unique index, so a superseded link stays as history and a
+    live duplicate is refreshed rather than duplicated.
+    """
     if source_id == target_id:
         return
     await conn.execute(
         """
         INSERT INTO document_links (source_id, target_id, kind)
         VALUES ($1, $2, $3)
-        ON CONFLICT (source_id, target_id, kind) DO NOTHING
+        ON CONFLICT (source_id, target_id, kind) WHERE invalid_at IS NULL
+        DO UPDATE SET invalid_at = NULL, valid_from = now()
         """,
         source_id,
         target_id,
@@ -249,12 +255,18 @@ async def resolve_pending_links_for(
 
 
 async def clear_outgoing_links(conn: asyncpg.Connection, document_id: int) -> None:
-    """Remove this document's outgoing links (materialised and pending).
+    """Retire this document's outgoing links before re-writing them on re-ingest.
 
-    Called before re-writing links on re-ingestion so stale references do not
-    accumulate across versions.
+    Materialised ``document_links`` are invalidated (``invalid_at = now()``) so
+    superseded references stay as history, mirroring ``add_link``. Pending links
+    are a transient resolution queue with no provenance value, so they are still
+    hard-deleted here.
     """
-    await conn.execute("DELETE FROM document_links WHERE source_id = $1", document_id)
+    await conn.execute(
+        "UPDATE document_links SET invalid_at = now() "
+        "WHERE source_id = $1 AND invalid_at IS NULL",
+        document_id,
+    )
     await conn.execute("DELETE FROM pending_document_links WHERE source_id = $1", document_id)
 
 

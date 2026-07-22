@@ -1,9 +1,11 @@
 """Entity repository: entities, mentions, and bitemporal graph edges.
 
-Entities are upserted by ``(entity_type, canonical)``. Edges belonging to a
-document are *replaced* on re-ingestion by invalidating the ones no longer
-produced (``invalid_at = now()``) and (re)activating the current set — edges are
-never physically deleted, and graph traversal defaults to ``invalid_at IS NULL``.
+Entities are upserted by ``(entity_type, canonical)``. Mentions and edges
+belonging to a document are *replaced* on re-ingestion by invalidating the ones
+no longer produced (``invalid_at = now()``) and inserting the current set — rows
+are never physically deleted, and active reads default to ``invalid_at IS NULL``.
+The current set is guarded by a partial unique index on active rows, so a
+superseded mention/edge falls out of the index and survives as history.
 """
 
 from __future__ import annotations
@@ -47,11 +49,13 @@ async def upsert_entity(
 async def add_mention(
     conn: asyncpg.Connection, entity_id: int, document_id: int, role: str | None
 ) -> None:
-    """Link an entity to a document with a role (idempotent).
+    """Activate an entity's mention of a document with a role (idempotent).
 
-    A ``NULL`` role needs an explicit existence check: Postgres treats NULLs as
-    distinct in the unique constraint, so ``ON CONFLICT DO NOTHING`` would not
-    dedupe two role-less mentions of the same entity in one document.
+    Mirrors ``replace_relations``: an active duplicate is refreshed rather than
+    duplicated. A ``NULL`` role needs an explicit existence check because Postgres
+    treats NULLs as distinct in the partial unique index, so ``ON CONFLICT`` would
+    not dedupe two active role-less mentions of the same entity in one document;
+    the check is scoped to active rows so a re-ingest still inserts a fresh row.
     """
     if role is None:
         await conn.execute(
@@ -60,7 +64,8 @@ async def add_mention(
             SELECT $1, $2, NULL
             WHERE NOT EXISTS (
                 SELECT 1 FROM entity_mentions
-                WHERE entity_id = $1 AND document_id = $2 AND role IS NULL
+                WHERE entity_id = $1 AND document_id = $2
+                  AND role IS NULL AND invalid_at IS NULL
             )
             """,
             entity_id,
@@ -71,7 +76,8 @@ async def add_mention(
         """
         INSERT INTO entity_mentions (entity_id, document_id, role)
         VALUES ($1, $2, $3)
-        ON CONFLICT (entity_id, document_id, role) DO NOTHING
+        ON CONFLICT (entity_id, document_id, role) WHERE invalid_at IS NULL
+        DO UPDATE SET invalid_at = NULL, valid_from = now()
         """,
         entity_id,
         document_id,
@@ -80,8 +86,16 @@ async def add_mention(
 
 
 async def delete_mentions_for_document(conn: asyncpg.Connection, document_id: int) -> None:
-    """Remove all mentions of a document (before recreating them)."""
-    await conn.execute("DELETE FROM entity_mentions WHERE document_id = $1", document_id)
+    """Invalidate all active mentions of a document (before recreating them).
+
+    Rows are kept with ``invalid_at`` set — the mention history/provenance of
+    prior versions survives re-ingestion, mirroring ``replace_relations``.
+    """
+    await conn.execute(
+        "UPDATE entity_mentions SET invalid_at = now() "
+        "WHERE document_id = $1 AND invalid_at IS NULL",
+        document_id,
+    )
 
 
 async def replace_relations(
@@ -134,7 +148,13 @@ async def replace_relations(
 
 
 async def cleanup_orphans(conn: asyncpg.Connection) -> int:
-    """Delete entities with no mentions and no edges. Return how many were removed."""
+    """Delete entities with no mentions and no edges. Return how many were removed.
+
+    Rows are counted regardless of ``invalid_at``: an entity whose mentions/edges
+    are all invalidated still carries history and is deliberately *not* an orphan.
+    Deleting it would cascade (``ON DELETE CASCADE``) onto those invalidated rows
+    and destroy the provenance this bitemporal model exists to keep.
+    """
     value = await conn.fetchval(
         """
         WITH deleted AS (
