@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     database_url: str = "postgresql://kb:kb@localhost:5432/kb"
     backend_url: str = "http://localhost:8000"
+    # Shared secret guarding the backend HTTP surface. Empty disables auth
+    # (local/dev); when set, clients must send it as the ``X-KB-Secret`` header.
+    backend_shared_secret: str = ""
 
     # --- Agent model ----------------------------------------------------
     agent_model: str = "anthropic/claude-haiku-4.5"

@@ -86,7 +86,9 @@ class Backend:
     """httpx client for the KB Agent backend."""
 
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=CHAT_TIMEOUT)
+        secret = get_settings().backend_shared_secret
+        headers = {"X-KB-Secret": secret} if secret else None
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=CHAT_TIMEOUT, headers=headers)
 
     async def close(self) -> None:
         await self._client.aclose()

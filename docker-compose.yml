@@ -24,6 +24,7 @@ services:
     environment:
       KB_PROCESS: api
       DATABASE_URL: postgresql://kb:kb@db:5432/kb
+      BACKEND_SHARED_SECRET: ${BACKEND_SHARED_SECRET:-}
     depends_on:
       db:
         condition: service_healthy
@@ -38,6 +39,7 @@ services:
       KB_PROCESS: bot
       DATABASE_URL: postgresql://kb:kb@db:5432/kb
       BACKEND_URL: http://api:8000
+      BACKEND_SHARED_SECRET: ${BACKEND_SHARED_SECRET:-}
     depends_on:
       db:
         condition: service_healthy

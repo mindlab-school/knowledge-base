@@ -3,7 +3,7 @@
 A thin stdio MCP server (FastMCP) that exposes the knowledge base to Claude Code.
 It has no logic and no database access of its own: every tool is a single HTTP
 call to the backend. Identity and configuration come from the environment
-(``KB_BACKEND_URL``, ``KB_USER_ID``).
+(``KB_BACKEND_URL``, ``KB_USER_ID``, ``KB_SHARED_SECRET``).
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from mcp.server.fastmcp import FastMCP
 
 BACKEND_URL = os.environ.get("KB_BACKEND_URL", "http://localhost:8000")
 USER_ID = int(os.environ.get("KB_USER_ID", "0"))
+_SHARED_SECRET = os.environ.get("KB_SHARED_SECRET", "")
+HEADERS: dict[str, str] | None = {"X-KB-Secret": _SHARED_SECRET} if _SHARED_SECRET else None
 TIMEOUT = 300.0
 
 mcp = FastMCP("kb-agent")
@@ -29,12 +31,12 @@ def _render(response: httpx.Response) -> str:
 
 
 async def _post(path: str, payload: dict[str, Any]) -> str:
-    async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=TIMEOUT, headers=HEADERS) as client:
         return _render(await client.post(path, json=payload))
 
 
 async def _get(path: str, params: dict[str, Any]) -> str:
-    async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=TIMEOUT, headers=HEADERS) as client:
         return _render(await client.get(path, params=params))
 
 
@@ -74,7 +76,7 @@ async def kb_add_file(path: str) -> str:
     if not file_path.exists():
         return f"Файл не найден: {path}"
     data = file_path.read_bytes()
-    async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=TIMEOUT, headers=HEADERS) as client:
         response = await client.post(
             "/ingest/file",
             data={"telegram_id": str(USER_ID), "filename": file_path.name},
