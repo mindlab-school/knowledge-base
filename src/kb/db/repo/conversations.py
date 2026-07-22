@@ -18,30 +18,30 @@ async def get_or_create_active(conn: asyncpg.Connection, user_id: int) -> int:
 
     Race-safe against concurrent first-messages: the insert defers to the
     ``conversations_one_active`` partial unique index, so a connection that loses
-    the race reads the winner's row instead of creating a duplicate.
+    the race reads the winner's row instead of creating a duplicate. The
+    select-then-insert is retried a few times so that a ``/reset`` deactivating
+    the winner in the same instant cannot leave the caller without a row.
     """
-    record = await conn.fetchrow(
-        "SELECT id FROM conversations WHERE user_id = $1 AND active ORDER BY id DESC LIMIT 1",
-        user_id,
-    )
-    if record is not None:
-        return int(record["id"])
-    created = await conn.fetchrow(
-        """
-        INSERT INTO conversations (user_id) VALUES ($1)
-        ON CONFLICT (user_id) WHERE active DO NOTHING
-        RETURNING id
-        """,
-        user_id,
-    )
-    if created is not None:
-        return int(created["id"])
-    # Lost the race: another connection created the active conversation first.
-    record = await conn.fetchrow(
-        "SELECT id FROM conversations WHERE user_id = $1 AND active ORDER BY id DESC LIMIT 1",
-        user_id,
-    )
-    return int(record["id"])
+    for _ in range(3):
+        record = await conn.fetchrow(
+            "SELECT id FROM conversations WHERE user_id = $1 AND active ORDER BY id DESC LIMIT 1",
+            user_id,
+        )
+        if record is not None:
+            return int(record["id"])
+        created = await conn.fetchrow(
+            """
+            INSERT INTO conversations (user_id) VALUES ($1)
+            ON CONFLICT (user_id) WHERE active DO NOTHING
+            RETURNING id
+            """,
+            user_id,
+        )
+        if created is not None:
+            return int(created["id"])
+        # Lost the race and the winner was deactivated before we could read it;
+        # loop to re-select or create afresh.
+    raise RuntimeError(f"could not obtain an active conversation for user {user_id}")
 
 
 async def reset(conn: asyncpg.Connection, user_id: int) -> None:
