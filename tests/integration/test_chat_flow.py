@@ -9,6 +9,7 @@ import pytest
 
 from kb.agent.loop import AnswerResult
 from kb.api import app as app_module
+from kb.services import chat as chat_service
 
 pytestmark = pytest.mark.integration
 
@@ -29,7 +30,9 @@ async def test_chat_persists_and_builds_history(
             rounds=1,
         )
 
-    monkeypatch.setattr(app_module.agent_loop, "answer", fake_answer)
+    # The chat service reaches the agent loop through ``agent_loop.answer``; patch
+    # that shared module attribute so the HTTP path returns the fake result.
+    monkeypatch.setattr(chat_service.agent_loop, "answer", fake_answer)
 
     transport = httpx.ASGITransport(app=app_module.app)
     telegram_id = whitelisted_user["telegram_id"]
