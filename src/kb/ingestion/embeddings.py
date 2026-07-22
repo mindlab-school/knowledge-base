@@ -31,6 +31,12 @@ _LOCAL_BATCH = 32
 _OPENROUTER_BATCH = 100
 _VOYAGE_NATIVE_DIM = 2048
 
+# Process-wide cache so the heavy local ONNX session loads at most once. Keyed on
+# the config that actually determines the backend; a key change forces a rebuild.
+_EmbedderKey = tuple[str, str, int, str]
+_embedder: Embedder | None = None
+_embedder_key: _EmbedderKey | None = None
+
 
 def apply_query_prefix(text: str) -> str:
     """Prepend the mandatory retrieval prefix to a query string."""
@@ -184,9 +190,33 @@ class LocalVoyageEmbedder:
         return self._forward([apply_query_prefix(text)])[0]
 
 
+def reset_embedder_cache() -> None:
+    """Drop the cached process-level embedder (used by tests)."""
+    global _embedder, _embedder_key
+    _embedder = None
+    _embedder_key = None
+
+
 def make_embedder(settings: Settings | None = None) -> Embedder:
-    """Return the configured embedding backend."""
+    """Return the configured embedding backend, cached at process level.
+
+    Repeated calls with the same effective config return the same instance, so
+    the local ONNX session is loaded once per process. The cache rebuilds when
+    the config that determines the backend changes.
+    """
+    global _embedder, _embedder_key
     settings = settings or get_settings()
-    if settings.embed_backend == "openrouter":
-        return OpenRouterEmbedder(settings)
-    return LocalVoyageEmbedder(settings)
+    key: _EmbedderKey = (
+        settings.embed_backend,
+        settings.embed_model,
+        settings.embed_dim,
+        settings.embed_model_path,
+    )
+    if _embedder is None or _embedder_key != key:
+        _embedder = (
+            OpenRouterEmbedder(settings)
+            if settings.embed_backend == "openrouter"
+            else LocalVoyageEmbedder(settings)
+        )
+        _embedder_key = key
+    return _embedder
