@@ -15,6 +15,7 @@ import asyncpg
 
 from kb.db.pool import get_pool
 from kb.db.repo import documents as documents_repo
+from kb.db.repo import entities as entities_repo
 
 DEFAULT_DOCUMENT_LIMIT = 15
 
@@ -40,6 +41,19 @@ def _parse_iso_date(value: Any) -> date | None:
             return datetime.fromisoformat(value).date()
         except ValueError:
             return None
+
+
+def _attr_date_expr(column: str) -> str:
+    """SQL that casts a JSONB attribute to ``date`` only when it looks like one.
+
+    ``column`` is a bound placeholder holding the attribute name. A filter such as
+    ``status_before`` targets an arbitrary attribute, so the value may not be a
+    date (e.g. ``'active'``). Casting it directly raises Postgres ``DataError``
+    (HTTP 500); the ``CASE`` guard yields ``NULL`` for a non-date value, which
+    excludes the row from the comparison instead.
+    """
+    ref = f"(d.attributes ->> {column})"
+    return f"CASE WHEN {ref} ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}' THEN {ref}::date END"
 
 
 class _Where:
@@ -98,7 +112,7 @@ def build_document_where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
             if parsed is not None:
                 where.add(f"d.created_at::date > {where.placeholder(parsed)}")
         elif key == "entity" and isinstance(value, dict) and value.get("name"):
-            canonical = str(value["name"]).strip().lower()
+            canonical = entities_repo.canonicalize(str(value["name"]))
             role = value.get("role")
             base = (
                 "EXISTS (SELECT 1 FROM entity_mentions em "
@@ -112,16 +126,14 @@ def build_document_where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
             parsed = _parse_iso_date(value)
             if parsed is None:
                 continue
-            field = key[: -len("_before")]
-            column = where.placeholder(field)
-            where.add(f"(d.attributes ->> {column})::date < {where.placeholder(parsed)}")
+            column = where.placeholder(key[: -len("_before")])
+            where.add(f"{_attr_date_expr(column)} < {where.placeholder(parsed)}")
         elif key.endswith("_after"):
             parsed = _parse_iso_date(value)
             if parsed is None:
                 continue
-            field = key[: -len("_after")]
-            column = where.placeholder(field)
-            where.add(f"(d.attributes ->> {column})::date > {where.placeholder(parsed)}")
+            column = where.placeholder(key[: -len("_after")])
+            where.add(f"{_attr_date_expr(column)} > {where.placeholder(parsed)}")
     return where.sql, where.params
 
 

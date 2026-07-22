@@ -28,8 +28,25 @@ def test_attributes_containment() -> None:
 
 def test_attribute_date_filter() -> None:
     sql, params = build_document_where({"review_by_before": "2026-07-18"})
-    assert "(d.attributes ->> $1)::date < $2" in sql
+    assert "(d.attributes ->> $1)::date END < $2" in sql
     assert params == ["review_by", date(2026, 7, 18)]
+
+
+def test_attribute_date_cast_is_guarded() -> None:
+    # A ``<attr>_before`` filter can target a non-date attribute (e.g. ``status``);
+    # the cast must be guarded so a value like ``'active'`` yields NULL (row
+    # excluded) rather than raising a Postgres ``DataError`` that 500s the query.
+    sql, params = build_document_where({"status_before": "2026-01-01"})
+    assert "CASE WHEN (d.attributes ->> $1) ~ '^\\d{4}-\\d{2}-\\d{2}'" in sql
+    assert "THEN (d.attributes ->> $1)::date END < $2" in sql
+    assert params == ["status", date(2026, 1, 1)]
+
+
+def test_attribute_date_after_is_guarded() -> None:
+    sql, params = build_document_where({"status_after": "2026-01-01"})
+    assert "CASE WHEN (d.attributes ->> $1) ~ '^\\d{4}-\\d{2}-\\d{2}'" in sql
+    assert "THEN (d.attributes ->> $1)::date END > $2" in sql
+    assert params == ["status", date(2026, 1, 1)]
 
 
 def test_created_range() -> None:
