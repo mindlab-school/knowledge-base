@@ -141,6 +141,24 @@ async def test_related_documents_marks_superseded_version(pool: Any, fake_embedd
     assert related_to_old[0]["current"] is True
 
 
+async def test_document_card_includes_related(pool: Any, fake_embedder: Any) -> None:
+    from kb.search import structured
+
+    payload = extraction_payload("generic", attributes={"summary": "s", "language": "ru"})
+    a = await _ingest(pool, fake_embedder, title="A", source_path="a.md", payload=payload)
+    b = await _ingest(pool, fake_embedder, title="B", source_path="b.md", payload=payload)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO document_links (source_id, target_id, kind) VALUES ($1, $2, 'reference')",
+            a.document_id,
+            b.document_id,
+        )
+
+    card = await structured.get_document_card(a.document_id, pool=pool)
+    assert card is not None
+    assert [row["id"] for row in card["related"]] == [b.document_id]
+
+
 async def test_duplicate_null_role_mention_deduped(pool: Any, fake_embedder: Any) -> None:
     payload = extraction_payload(
         "generic",

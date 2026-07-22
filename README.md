@@ -336,6 +336,8 @@ Migrations are **forward-only** numbered SQL files under `migrations/`, applied 
 | `0002_source_kind.sql` | `documents.source_kind` (`file` \| `url`) |
 | `0003_session_activity.sql` | `ingest_sessions.last_active_at` (idle autoclose) |
 | `0004_pending_links.sql` | `pending_document_links` (deferred link resolution) |
+| `0005_conv_active_cost_idx.sql` | Partial-unique index enforcing one active `conversations` row per user; partial index on `messages(created_at)` for the month-to-date cost query |
+| `0006_bitemporal_mentions_links.sql` | `valid_from`/`invalid_at` on `entity_mentions` and `document_links` (invalidate-not-delete), with partial-unique active indexes |
 
 **Tables**
 
@@ -347,9 +349,9 @@ Migrations are **forward-only** numbered SQL files under `migrations/`, applied 
 | `documents` | `raw_content` (source of truth), `doc_type`, `attributes` (JSONB), `content_hash`, `version`, `extraction_status`, `source_kind`. |
 | `chunks` | `content` + `embedding halfvec(1024)` + generated `tsv` (Russian FTS). HNSW + GIN indexes. |
 | `entities` | `entity_type`, `name`, `canonical` (unique per type). |
-| `entity_mentions` | Entity ↔ document with a `role`. |
+| `entity_mentions` | Entity ↔ document with a `role` (bitemporal: `valid_from`/`invalid_at`; re-ingest invalidates, never deletes). |
 | `entity_relations` | Entity → entity edges (bitemporal: `valid_from`/`invalid_at`). |
-| `document_links` | Document → document edges (`reference`/`supersedes`/`attachment`). |
+| `document_links` | Document → document edges (`reference`/`supersedes`/`attachment`; bitemporal: `valid_from`/`invalid_at`). |
 | `pending_document_links` | Links whose target isn’t ingested yet. |
 | `facts` | Bitemporal business-context records (one active per topic). |
 | `conversations` / `messages` | Chat history + per-message OpenRouter `usage` (for cost). |
@@ -622,7 +624,7 @@ The `/search*` endpoints exist for the MCP plugin.
 | `POST /ingest/message` | `{telegram_id, text}` | Buffer text into the active session → `{seq}`, or `409` if none is active. |
 | `GET /facts` | `?telegram_id` | List fact topics with `updated_at`. |
 | `DELETE /facts/{topic}` | `?telegram_id` | Soft-delete a fact topic (`404` if none). |
-| `GET /documents/{id}` | `?telegram_id` | Full document card (attributes, chunk count, entity mentions). |
+| `GET /documents/{id}` | `?telegram_id` | Full document card (attributes, chunk count, entity mentions, and linked/`related` documents). |
 | `POST /search` | `{telegram_id, query, filters?}` | Hybrid chunk search (MCP). |
 | `POST /search/documents` | `{telegram_id, filters?}` | Structured document query (MCP). |
 | `POST /search/entity` | `{telegram_id, name, depth?}` | Entity card + graph (MCP). |
@@ -915,8 +917,9 @@ export or a file instead.
   repository, keeping persistence auditable in one place. Read queries are *not*
   centralised: the `search/*` layer and the admin CLI compose their own SELECTs
   against the tables they report on.
-- **Bitemporal, not destructive.** Facts and entity relations invalidate old
-  versions instead of deleting them, preserving history and provenance.
+- **Bitemporal, not destructive.** Facts, entity relations, entity mentions and
+  document links invalidate old versions instead of deleting them, so re-ingesting
+  a document preserves the full history and provenance of what it once said.
 - **Small agent context by design.** Tool results are capped (4 chunks, 15
   documents, 8k-char document body, 40 graph nodes) to keep prompts cheap and fast.
 

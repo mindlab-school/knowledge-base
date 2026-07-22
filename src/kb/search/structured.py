@@ -16,6 +16,7 @@ import asyncpg
 from kb.db.pool import get_pool
 from kb.db.repo import documents as documents_repo
 from kb.db.repo import entities as entities_repo
+from kb.search import graph
 
 DEFAULT_DOCUMENT_LIMIT = 15
 
@@ -194,7 +195,8 @@ ORDER BY e.id
 async def get_document_card(
     document_id: int, *, pool: asyncpg.Pool | None = None
 ) -> dict[str, Any] | None:
-    """Return a document with its chunk count and entity mentions (with roles)."""
+    """Return a document with its chunk count, entity mentions (with roles), and
+    the documents it is linked to (``related``; each flagged ``current``)."""
     pool = pool or await get_pool()
     async with pool.acquire() as conn:
         document = await documents_repo.get(conn, document_id)
@@ -205,4 +207,5 @@ async def get_document_card(
     card = dict(document)
     card["chunks"] = chunks
     card["entities"] = [dict(row) for row in mentions]
+    card["related"] = await graph.related_documents(document_id, pool=pool)
     return card

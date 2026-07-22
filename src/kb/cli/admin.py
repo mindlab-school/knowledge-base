@@ -151,6 +151,11 @@ async def cmd_show_doc(args: argparse.Namespace, conn: asyncpg.Connection) -> No
     print("entities:")
     for entity in card["entities"]:
         print(f"  {entity['name']} ({entity['entity_type']}) — {entity['role']}")
+    if card.get("related"):
+        print("related:")
+        for doc in card["related"]:
+            flag = "" if doc["current"] else " (superseded)"
+            print(f"  #{doc['id']} {doc['title']} ({doc['doc_type']} v{doc['version']}){flag}")
 
 
 async def cmd_set_type(args: argparse.Namespace, conn: asyncpg.Connection) -> None:
